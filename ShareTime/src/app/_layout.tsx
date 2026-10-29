@@ -6,7 +6,7 @@ import { useRouter, useSegments } from 'expo-router';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
-import { supabase } from '@/lib/supabase'; // Clean path alias import
+import { supabase } from '@/lib/supabase';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -19,13 +19,13 @@ export default function TabLayout() {
   const segments = useSegments();
 
   useEffect(() => {
-    // 1. Check current session on mount
+    // 1. Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setIsLoading(false);
     });
 
-    // 2. Listen for real-time auth changes (login/logout)
+    // 2. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setIsLoading(false);
@@ -37,19 +37,16 @@ export default function TabLayout() {
   useEffect(() => {
     if (isLoading) return;
 
-    // Check if the user is currently inside the (auth) folder group
     const inAuthGroup = segments[0] === '(auth)';
 
+    // Only redirect if necessary to prevent infinite loops
     if (!session && !inAuthGroup) {
-      // If NOT logged in, redirect them to your login screen
       router.replace('/(auth)/login');
     } else if (session && inAuthGroup) {
-      // If ALREADY logged in and trying to view login/signup, push them to home
       router.replace('/');
     }
   }, [session, isLoading, segments]);
 
-  // Show a loading spinner while checking auth state to prevent UI flashing
   if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
