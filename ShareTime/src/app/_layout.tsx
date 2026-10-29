@@ -1,17 +1,9 @@
 import { useEffect, useState } from 'react';
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme, View, ActivityIndicator } from 'react-native';
-import { useRouter, useSegments } from 'expo-router';
-
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { Slot, useRouter, useSegments } from 'expo-router';
+import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
-SplashScreen.preventAutoHideAsync();
-
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function RootLayout() {
   const [session, setSession] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   
@@ -19,13 +11,11 @@ export default function TabLayout() {
   const segments = useSegments();
 
   useEffect(() => {
-    // 1. Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setIsLoading(false);
     });
 
-    // 2. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setIsLoading(false);
@@ -39,7 +29,6 @@ export default function TabLayout() {
 
     const inAuthGroup = segments[0] === '(auth)';
 
-    // Only redirect if necessary to prevent infinite loops
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (session && inAuthGroup) {
@@ -55,10 +44,5 @@ export default function TabLayout() {
     );
   }
 
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
-  );
+  return <Slot />;
 }
