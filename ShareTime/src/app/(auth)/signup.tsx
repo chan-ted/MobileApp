@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '../../lib/supabase'; // Adjust path if needed (e.g., '@/lib/supabase')
+import { supabase } from '@/lib/supabase'; // Adjust path if needed (e.g., '@/lib/supabase')
 
 export default function SignUpScreen() {
   const router = useRouter();
