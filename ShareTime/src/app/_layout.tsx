@@ -52,7 +52,7 @@ export default function RootLayout() {
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!session && !inAuthGroup) {
-      router.replace('/(auth)/login');
+      router.replace('/login'); // 👈 FIXED: Removed (auth) route group from path
     } else if (session && inAuthGroup) {
       router.replace('/');
     }
@@ -66,7 +66,6 @@ export default function RootLayout() {
     );
   }
 
-  // 👇 WRAP <Slot /> IN A FLEX CONTAINER SO IT FILLS THE SCREEN NATIVELY
   return (
     <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
       <Slot />
