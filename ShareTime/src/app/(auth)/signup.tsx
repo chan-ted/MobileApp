@@ -22,6 +22,7 @@ export default function SignUpScreen() {
   const [loading, setLoading] = useState(false);
 
   async function handleSignUp() {
+    console.log('1. Sign up button pressed');
     if (!email || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill in all fields.');
       return;
