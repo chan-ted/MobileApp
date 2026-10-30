@@ -6,36 +6,43 @@ import { Platform } from 'react-native';
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Custom storage adapter that prevents SSR "window is not defined" crashes on web
+// Bulletproof custom storage adapter for Expo & Web
 const ExpoStorageAdapter = {
-  getItem: (key: string) => {
-    if (Platform.OS === 'web') {
-      if (typeof window === 'undefined') {
-        return Promise.resolve(null);
+  getItem: async (key: string) => {
+    try {
+      if (Platform.OS === 'web') {
+        if (typeof window === 'undefined') return null;
+        return localStorage.getItem(key);
       }
-      return Promise.resolve(localStorage.getItem(key));
+      return await AsyncStorage.getItem(key);
+    } catch (error) {
+      console.error('Storage getItem error:', error);
+      return null;
     }
-    return AsyncStorage.getItem(key);
   },
-  setItem: (key: string, value: string) => {
-    if (Platform.OS === 'web') {
-      if (typeof window === 'undefined') {
-        return Promise.resolve();
+  setItem: async (key: string, value: string) => {
+    try {
+      if (Platform.OS === 'web') {
+        if (typeof window === 'undefined') return;
+        localStorage.setItem(key, value);
+        return;
       }
-      localStorage.setItem(key, value);
-      return Promise.resolve();
+      await AsyncStorage.setItem(key, value);
+    } catch (error) {
+      console.error('Storage setItem error:', error);
     }
-    return AsyncStorage.setItem(key, value);
   },
-  removeItem: (key: string) => {
-    if (Platform.OS === 'web') {
-      if (typeof window === 'undefined') {
-        return Promise.resolve();
+  removeItem: async (key: string) => {
+    try {
+      if (Platform.OS === 'web') {
+        if (typeof window === 'undefined') return;
+        localStorage.removeItem(key);
+        return;
       }
-      localStorage.removeItem(key);
-      return Promise.resolve();
+      await AsyncStorage.removeItem(key);
+    } catch (error) {
+      console.error('Storage removeItem error:', error);
     }
-    return AsyncStorage.removeItem(key);
   },
 };
 
