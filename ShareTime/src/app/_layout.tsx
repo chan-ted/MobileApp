@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
@@ -13,6 +13,7 @@ export default function RootLayout() {
   useEffect(() => {
     let isMounted = true;
 
+    // Failsafe timer: forces loading to stop after 2 seconds if network hangs
     const timeoutId = setTimeout(() => {
       if (isMounted && isLoading) {
         setIsLoading(false);
@@ -66,6 +67,11 @@ export default function RootLayout() {
     );
   }
 
-  // 👇 REMOVED THE <View> WRAPPER SO THE NAVIGATOR MEASURES CORRECTLY
-  return <Slot />;
+  // 👇 ROOT <Stack> PROVIDES THE PROPER NATIVE CONTAINER DIMENSIONS INSTEAD OF <Slot />
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="(auth)" />
+    </Stack>
+  );
 }
