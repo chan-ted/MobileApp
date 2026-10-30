@@ -11,17 +11,44 @@ export default function RootLayout() {
   const segments = useSegments();
 
   useEffect(() => {
+    let isMounted = true;
+
+    // Failsafe timer: If Supabase takes too long, force stop loading after 2 seconds
+    const timeoutId = setTimeout(() => {
+      if (isMounted && isLoading) {
+        console.log('Auth check timed out, forcing load state...');
+        setIsLoading(false);
+      }
+    }, 2000);
+
+    // 1. Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setIsLoading(false);
+      if (isMounted) {
+        setSession(session);
+        setIsLoading(false);
+        clearTimeout(timeoutId);
+      }
+    }).catch((err) => {
+      console.log('Session fetch error:', err);
+      if (isMounted) {
+        setIsLoading(false);
+        clearTimeout(timeoutId);
+      }
     });
 
+    // 2. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setIsLoading(false);
+      if (isMounted) {
+        setSession(session);
+        setIsLoading(false);
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -38,8 +65,8 @@ export default function RootLayout() {
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
   }
