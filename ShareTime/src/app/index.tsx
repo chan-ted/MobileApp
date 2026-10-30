@@ -1,18 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { User } from '@supabase/supabase-js';
 import { AnimatedSplashOverlay } from '@/components/animated-icon'; // Adjust path if needed
 
 export default function HomeScreen() {
   const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
 
   useEffect(() => {
+
+    // 1. Fetch the authenticated user data on mount
+    async function getUserData() {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (user) {
+        setUser(user);
+      }
+      setLoadingUser(false);
+    }
+
+    getUserData();
+
+
     // Hide the splash overlay after your animation completes (e.g., 2 seconds)
     const timer = setTimeout(() => {
       setIsSplashVisible(false);
     }, 2000);
+
+
 
     return () => clearTimeout(timer);
   }, []);
@@ -22,12 +40,16 @@ export default function HomeScreen() {
     router.replace('/login' as any);
   }
 
+  const userEmail = user?.email || 'No email found';
+
   return (
     <View style={styles.container}>
       {/* Main Screen Content */}
-      <Text style={styles.title}>Welcome to the App! 🎉</Text>
-      <Text style={styles.subtitle}>You are successfully logged in.</Text>
-
+      {loadingUser ? (
+        <ActivityIndicator size="small" color="#007AFF" style={{ marginVertical: 8 }} />
+      ) : (
+        <Text style={styles.subtitle}>Logged in as: {userEmail}</Text>
+      )}
       <TouchableOpacity style={styles.button} onPress={handleLogout}>
         <Text style={styles.buttonText}>Log Out</Text>
       </TouchableOpacity>
