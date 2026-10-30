@@ -13,30 +13,25 @@ export default function RootLayout() {
   useEffect(() => {
     let isMounted = true;
 
-    // Failsafe timer: If Supabase takes too long, force stop loading after 2 seconds
     const timeoutId = setTimeout(() => {
       if (isMounted && isLoading) {
-        console.log('Auth check timed out, forcing load state...');
         setIsLoading(false);
       }
     }, 2000);
 
-    // 1. Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (isMounted) {
         setSession(session);
         setIsLoading(false);
         clearTimeout(timeoutId);
       }
-    }).catch((err) => {
-      console.log('Session fetch error:', err);
+    }).catch(() => {
       if (isMounted) {
         setIsLoading(false);
         clearTimeout(timeoutId);
       }
     });
 
-    // 2. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (isMounted) {
         setSession(session);
@@ -71,5 +66,10 @@ export default function RootLayout() {
     );
   }
 
-  return <Slot />;
+  // 👇 WRAP <Slot /> IN A FLEX CONTAINER SO IT FILLS THE SCREEN NATIVELY
+  return (
+    <View style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+      <Slot />
+    </View>
+  );
 }
