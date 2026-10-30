@@ -52,9 +52,9 @@ export default function RootLayout() {
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!session && !inAuthGroup) {
-      router.replace('/login'); // 👈 FIXED: Removed (auth) route group from path
+      router.replace('/login' as any); // 👈 FIXED: Removed (auth) route group from path
     } else if (session && inAuthGroup) {
-      router.replace('/');
+      router.replace('/' as any);
     }
   }, [session, isLoading, segments]);
 
