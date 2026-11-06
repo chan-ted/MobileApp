@@ -53,6 +53,7 @@ export default function EventDetailScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [startTime, setStartTime] = useState('');
+  const [creatorName, setCreatorName] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
   const [originalDescription, setOriginalDescription] = useState('');
 
@@ -73,7 +74,7 @@ export default function EventDetailScreen() {
         if (!user) return;
         setCurrentUserId(user.id);
 
-        // 1. Fetch Event Details
+        // 1. Fetch Event Details (Simple query without joins)
         const { data: eventData, error: eventError } = await supabase
           .from('events')
           .select('*')
@@ -92,7 +93,19 @@ export default function EventDetailScreen() {
           setIsOrganizer(true);
         }
 
-        // 2. Fetch Participants & Messages
+        // 2. Fetch Creator Profile via 2-step query
+        const { data: creatorProfile } = await supabase
+          .from('profiles')
+          .select('email, full_name')
+          .eq('id', eventData.created_by)
+          .single();
+
+        setCreatorName(creatorProfile?.full_name || creatorProfile?.email || 'Unknown Organizer');
+
+        // 3. Mark event messages as read immediately upon opening
+        await markAsRead(id, user.id);
+
+        // 4. Fetch Participants & Messages
         await fetchParticipants();
         await fetchMessages();
       } catch (error: any) {
@@ -104,7 +117,7 @@ export default function EventDetailScreen() {
 
     init();
 
-    // 3. Realtime Chat Subscription
+    // 5. Realtime Chat Subscription
     const channel = supabase
       .channel(`chat:${id}`)
       .on(
@@ -137,6 +150,34 @@ export default function EventDetailScreen() {
       supabase.removeChannel(channel);
     };
   }, [id]);
+
+  // --- Mark as Read Function ---
+  async function markAsRead(eventId: string, userId: string) {
+    try {
+      const nowIso = new Date().toISOString();
+      
+      const { data, error } = await supabase
+        .from('event_participants')
+        .update({ last_read_at: nowIso })
+        .eq('event_id', eventId)
+        .eq('user_id', userId)
+        .select();
+
+      // If user isn't in event_participants yet, insert a record so unread tracking works
+      if (!data || data.length === 0) {
+        await supabase
+          .from('event_participants')
+          .insert({
+            event_id: eventId,
+            user_id: userId,
+            status: 'accepted',
+            last_read_at: nowIso,
+          });
+      }
+    } catch (err) {
+      console.error('Error marking event as read:', err);
+    }
+  }
 
   // --- Data Fetching Helpers ---
   async function fetchParticipants() {
@@ -190,7 +231,18 @@ export default function EventDetailScreen() {
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-      setMessages(data || []);
+
+      const formattedMessages: Message[] = (data || []).map((item: any) => ({
+        id: item.id,
+        content: item.content,
+        created_at: item.created_at,
+        sender_id: item.sender_id,
+        profiles: Array.isArray(item.profiles)
+          ? (item.profiles[0] || { email: 'Unknown' })
+          : (item.profiles || { email: 'Unknown' }),
+      }));
+
+      setMessages(formattedMessages);
     } catch (error: any) {
       console.error('Error fetching messages:', error.message);
     }
@@ -322,9 +374,19 @@ export default function EventDetailScreen() {
       if (error) throw error;
 
       if (data) {
+        const normalizedMsg: Message = {
+          id: (data as any).id,
+          content: (data as any).content,
+          created_at: (data as any).created_at,
+          sender_id: (data as any).sender_id,
+          profiles: Array.isArray((data as any).profiles)
+            ? ((data as any).profiles[0] || { email: 'Unknown' })
+            : ((data as any).profiles || { email: 'Unknown' }),
+        };
+
         setMessages((prev) => {
-          if (prev.some(m => m.id === data.id)) return prev;
-          return [...prev, data as Message];
+          if (prev.some(m => m.id === normalizedMsg.id)) return prev;
+          return [...prev, normalizedMsg];
         });
       }
     } catch (error: any) {
@@ -385,6 +447,10 @@ export default function EventDetailScreen() {
                   )}
                 </View>
 
+                {/* Organizer Info */}
+                <Text style={styles.label}>Organizer</Text>
+                <Text style={styles.valueText}>👤 {creatorName}</Text>
+
                 {/* Title */}
                 <Text style={styles.label}>Event Title</Text>
                 {isEditing ? (
@@ -417,7 +483,7 @@ export default function EventDetailScreen() {
 
               {/* Participants Card */}
               <View style={styles.card}>
-                <Text style={styles.sectionHeading}>Current Participants ({participants.length})</Text>
+                <Text style={styles.sectionHeading}>Participants ({participants.length})</Text>
 
                 {/* Participant Chips */}
                 <View style={styles.chipsContainer}>
