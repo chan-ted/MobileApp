@@ -32,7 +32,6 @@ export default function EventsHomeScreen() {
   const [events, setEvents] = useState<CombinedEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
 
-  // Fetch current user on mount
   useEffect(() => {
     async function initUser() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -45,7 +44,6 @@ export default function EventsHomeScreen() {
     initUser();
   }, []);
 
-  // Refetch events whenever the screen comes back into focus
   useFocusEffect(
     useCallback(() => {
       if (user) {
@@ -57,20 +55,16 @@ export default function EventsHomeScreen() {
   async function fetchAllEvents(userId: string) {
     setLoadingEvents(true);
     try {
-      // 1. Fetch upcoming or active events created by the user (or fetch all and let client handle sorting)
-      // Note: To show upcoming events here, we can filter start_time >= current time or show all active. 
-      // Keeping your existing fetch which grabs everything or filters. Let's make sure it filters upcoming if past events has its own page!
       const nowIso = new Date().toISOString();
 
       const { data: createdEvents, error: createdError } = await supabase
         .from('events')
         .select('*')
         .eq('created_by', userId)
-        .gte('start_time', nowIso); // Showing upcoming/current events on main screen
+        .gte('start_time', nowIso);
 
       if (createdError) throw createdError;
 
-      // 2. Fetch upcoming events the user is invited to via event_participants
       const { data: invitedData, error: invitedError } = await supabase
         .from('event_participants')
         .select(`
@@ -88,7 +82,6 @@ export default function EventsHomeScreen() {
 
       if (invitedError) throw invitedError;
 
-      // Format created events
       const formattedCreated: CombinedEvent[] = (createdEvents || []).map(ev => ({
         ...ev,
         isOrganizer: true,
@@ -97,7 +90,6 @@ export default function EventsHomeScreen() {
 
       const createdIds = new Set(formattedCreated.map(e => e.id));
 
-      // Format invited events (only future ones)
       const formattedInvited: CombinedEvent[] = (invitedData || [])
         .filter((item: any) => item.events && !createdIds.has(item.events.id) && item.events.start_time >= nowIso)
         .map((item: any) => ({
@@ -106,7 +98,6 @@ export default function EventsHomeScreen() {
           status: item.status,
         }));
 
-      // Combine both lists and sort by start time
       const combined = [...formattedCreated, ...formattedInvited].sort(
         (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
       );
@@ -162,7 +153,7 @@ export default function EventsHomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Navigation Buttons Row (Past Events & New Event) */}
+      {/* Navigation Buttons Row */}
       <View style={styles.scheduleHeaderRow}>
         <TouchableOpacity 
           style={styles.historyButton} 
@@ -200,38 +191,45 @@ export default function EventsHomeScreen() {
 
             return (
               <View style={styles.eventCard}>
-                <View style={styles.cardHeaderRow}>
-                  <Text style={styles.eventTitle}>{item.title}</Text>
-                  
-                  {item.isOrganizer ? (
-                    <View style={[styles.badge, styles.badgeOrganizer]}>
-                      <Text style={styles.badgeOrganizerText}>Organizer</Text>
-                    </View>
-                  ) : item.status === 'accepted' ? (
-                    <View style={[styles.badge, styles.badgeAccepted]}>
-                      <Text style={styles.badgeAcceptedText}>Attending</Text>
-                    </View>
-                  ) : item.status === 'declined' ? (
-                    <View style={[styles.badge, styles.badgeDeclined]}>
-                      <Text style={styles.badgeDeclinedText}>Declined</Text>
-                    </View>
-                  ) : (
-                    <View style={[styles.badge, styles.badgePending]}>
-                      <Text style={styles.badgePendingText}>Pending Invite</Text>
-                    </View>
-                  )}
-                </View>
+                {/* Clickable Card Body linked to Event Details */}
+                <TouchableOpacity 
+                  activeOpacity={0.8}
+                  onPress={() => router.push(`/event/${item.id}` as any)}
+                >
+                  <View style={styles.cardHeaderRow}>
+                    <Text style={styles.eventTitle}>{item.title}</Text>
+                    
+                    {item.isOrganizer ? (
+                      <View style={[styles.badge, styles.badgeOrganizer]}>
+                        <Text style={styles.badgeOrganizerText}>Organizer</Text>
+                      </View>
+                    ) : item.status === 'accepted' ? (
+                      <View style={[styles.badge, styles.badgeAccepted]}>
+                        <Text style={styles.badgeAcceptedText}>Attending</Text>
+                      </View>
+                    ) : item.status === 'declined' ? (
+                      <View style={[styles.badge, styles.badgeDeclined]}>
+                        <Text style={styles.badgeDeclinedText}>Declined</Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.badge, styles.badgePending]}>
+                        <Text style={styles.badgePendingText}>Pending Invite</Text>
+                      </View>
+                    )}
+                  </View>
 
-                {item.description ? (
-                  <Text style={styles.eventDescription} numberOfLines={2}>
-                    {item.description}
+                  {item.description ? (
+                    <Text style={styles.eventDescription} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  ) : null}
+
+                  <Text style={styles.eventTime}>
+                    🕒 {new Date(item.start_time).toLocaleString()}
                   </Text>
-                ) : null}
+                </TouchableOpacity>
 
-                <Text style={styles.eventTime}>
-                  🕒 {new Date(item.start_time).toLocaleString()}
-                </Text>
-
+                {/* Accept / Decline Action Buttons for Pending Invites (Separate from card click) */}
                 {isPending && (
                   <View style={styles.inviteActionsRow}>
                     <TouchableOpacity 
