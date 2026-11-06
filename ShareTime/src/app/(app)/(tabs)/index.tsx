@@ -5,18 +5,23 @@ import {
   TouchableOpacity, 
   StyleSheet, 
   ActivityIndicator, 
-  FlatList 
+  FlatList, 
+  Alert 
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
+import { Ionicons } from '@expo/vector-icons';
 
-type EventItem = {
+type CombinedEvent = {
   id: string;
   title: string;
   description: string;
   start_time: string;
   end_time: string;
+  created_by: string;
+  isOrganizer: boolean;
+  status: 'accepted' | 'pending' | 'declined';
 };
 
 export default function EventsHomeScreen() {
@@ -24,16 +29,16 @@ export default function EventsHomeScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   
-  const [events, setEvents] = useState<EventItem[]>([]);
+  const [events, setEvents] = useState<CombinedEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
 
-  // Fetch current user and their events on mount
+  // Fetch current user on mount
   useEffect(() => {
     async function initUser() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUser(user);
-        fetchEvents(user.id);
+        fetchAllEvents(user.id);
       }
       setLoadingUser(false);
     }
@@ -44,26 +49,91 @@ export default function EventsHomeScreen() {
   useFocusEffect(
     useCallback(() => {
       if (user) {
-        fetchEvents(user.id);
+        fetchAllEvents(user.id);
       }
     }, [user])
   );
 
-  async function fetchEvents(userId: string) {
+  async function fetchAllEvents(userId: string) {
     setLoadingEvents(true);
     try {
-      const { data, error } = await supabase
+      // 1. Fetch upcoming or active events created by the user (or fetch all and let client handle sorting)
+      // Note: To show upcoming events here, we can filter start_time >= current time or show all active. 
+      // Keeping your existing fetch which grabs everything or filters. Let's make sure it filters upcoming if past events has its own page!
+      const nowIso = new Date().toISOString();
+
+      const { data: createdEvents, error: createdError } = await supabase
         .from('events')
         .select('*')
-        .eq('created_by', userId) // <-- Updated to match your column name!
-        .order('start_time', { ascending: true });
+        .eq('created_by', userId)
+        .gte('start_time', nowIso); // Showing upcoming/current events on main screen
 
-      if (error) throw error;
-      setEvents(data || []);
+      if (createdError) throw createdError;
+
+      // 2. Fetch upcoming events the user is invited to via event_participants
+      const { data: invitedData, error: invitedError } = await supabase
+        .from('event_participants')
+        .select(`
+          status,
+          events (
+            id,
+            title,
+            description,
+            start_time,
+            end_time,
+            created_by
+          )
+        `)
+        .eq('user_id', userId);
+
+      if (invitedError) throw invitedError;
+
+      // Format created events
+      const formattedCreated: CombinedEvent[] = (createdEvents || []).map(ev => ({
+        ...ev,
+        isOrganizer: true,
+        status: 'accepted',
+      }));
+
+      const createdIds = new Set(formattedCreated.map(e => e.id));
+
+      // Format invited events (only future ones)
+      const formattedInvited: CombinedEvent[] = (invitedData || [])
+        .filter((item: any) => item.events && !createdIds.has(item.events.id) && item.events.start_time >= nowIso)
+        .map((item: any) => ({
+          ...item.events,
+          isOrganizer: false,
+          status: item.status,
+        }));
+
+      // Combine both lists and sort by start time
+      const combined = [...formattedCreated, ...formattedInvited].sort(
+        (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+      );
+
+      setEvents(combined);
     } catch (error: any) {
       console.error('Error fetching events:', error.message);
     } finally {
       setLoadingEvents(false);
+    }
+  }
+
+  async function handleUpdateInvitationStatus(eventId: string, newStatus: 'accepted' | 'declined') {
+    try {
+      if (!user) return;
+
+      const { error } = await supabase
+        .from('event_participants')
+        .update({ status: newStatus })
+        .eq('event_id', eventId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      fetchAllEvents(user.id);
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
     }
   }
 
@@ -92,9 +162,16 @@ export default function EventsHomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Schedule Header & Create Event Button */}
+      {/* Navigation Buttons Row (Past Events & New Event) */}
       <View style={styles.scheduleHeaderRow}>
-        <Text style={styles.sectionTitle}>Your Schedule</Text>
+        <TouchableOpacity 
+          style={styles.historyButton} 
+          onPress={() => router.push('/past-events' as any)}
+        >
+          <Ionicons name="time-outline" size={16} color="#007AFF" />
+          <Text style={styles.historyButtonText}>Past Events</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity 
           style={styles.createButton} 
           onPress={() => router.push('/create-event' as any)}
@@ -110,7 +187,7 @@ export default function EventsHomeScreen() {
         </View>
       ) : events.length === 0 ? (
         <View style={styles.centerContainer}>
-          <Text style={styles.emptyText}>No scheduled events yet.</Text>
+          <Text style={styles.emptyText}>No upcoming events or invitations.</Text>
           <Text style={styles.emptySubText}>Tap "+ New Event" above to create one!</Text>
         </View>
       ) : (
@@ -118,19 +195,65 @@ export default function EventsHomeScreen() {
           data={events}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
-          renderItem={({ item }) => (
-            <View style={styles.eventCard}>
-              <Text style={styles.eventTitle}>{item.title}</Text>
-              {item.description ? (
-                <Text style={styles.eventDescription} numberOfLines={2}>
-                  {item.description}
+          renderItem={({ item }) => {
+            const isPending = !item.isOrganizer && item.status === 'pending';
+
+            return (
+              <View style={styles.eventCard}>
+                <View style={styles.cardHeaderRow}>
+                  <Text style={styles.eventTitle}>{item.title}</Text>
+                  
+                  {item.isOrganizer ? (
+                    <View style={[styles.badge, styles.badgeOrganizer]}>
+                      <Text style={styles.badgeOrganizerText}>Organizer</Text>
+                    </View>
+                  ) : item.status === 'accepted' ? (
+                    <View style={[styles.badge, styles.badgeAccepted]}>
+                      <Text style={styles.badgeAcceptedText}>Attending</Text>
+                    </View>
+                  ) : item.status === 'declined' ? (
+                    <View style={[styles.badge, styles.badgeDeclined]}>
+                      <Text style={styles.badgeDeclinedText}>Declined</Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.badge, styles.badgePending]}>
+                      <Text style={styles.badgePendingText}>Pending Invite</Text>
+                    </View>
+                  )}
+                </View>
+
+                {item.description ? (
+                  <Text style={styles.eventDescription} numberOfLines={2}>
+                    {item.description}
+                  </Text>
+                ) : null}
+
+                <Text style={styles.eventTime}>
+                  🕒 {new Date(item.start_time).toLocaleString()}
                 </Text>
-              ) : null}
-              <Text style={styles.eventTime}>
-                🕒 {new Date(item.start_time).toLocaleString()}
-              </Text>
-            </View>
-          )}
+
+                {isPending && (
+                  <View style={styles.inviteActionsRow}>
+                    <TouchableOpacity 
+                      style={[styles.actionButton, styles.acceptButton]}
+                      onPress={() => handleUpdateInvitationStatus(item.id, 'accepted')}
+                    >
+                      <Ionicons name="checkmark" size={16} color="#FFF" />
+                      <Text style={styles.actionButtonText}>Accept</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity 
+                      style={[styles.actionButton, styles.declineButton]}
+                      onPress={() => handleUpdateInvitationStatus(item.id, 'declined')}
+                    >
+                      <Ionicons name="close" size={16} color="#EF4444" />
+                      <Text style={styles.declineButtonText}>Decline</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            );
+          }}
         />
       )}
     </View>
@@ -174,7 +297,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  sectionTitle: { fontSize: 20, fontWeight: 'bold', color: '#111' },
+  historyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EBF3FF',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    gap: 6,
+  },
+  historyButtonText: { color: '#007AFF', fontWeight: '600', fontSize: 13 },
   createButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 8,
@@ -194,7 +326,45 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EFEFEF',
   },
-  eventTitle: { fontSize: 16, fontWeight: 'bold', color: '#222', marginBottom: 4 },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  eventTitle: { fontSize: 16, fontWeight: 'bold', color: '#222', flex: 1, marginRight: 8 },
   eventDescription: { fontSize: 13, color: '#666', marginBottom: 8 },
   eventTime: { fontSize: 12, color: '#007AFF', fontWeight: '500' },
+  
+  badge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6 },
+  badgeOrganizer: { backgroundColor: '#E0F2FE' },
+  badgeOrganizerText: { color: '#0369A1', fontSize: 11, fontWeight: '600' },
+  badgeAccepted: { backgroundColor: '#DCFCE7' },
+  badgeAcceptedText: { color: '#15803D', fontSize: 11, fontWeight: '600' },
+  badgeDeclined: { backgroundColor: '#FEE2E2' },
+  badgeDeclinedText: { color: '#B91C1C', fontSize: 11, fontWeight: '600' },
+  badgePending: { backgroundColor: '#FEF3C7' },
+  badgePendingText: { color: '#B45309', fontSize: 11, fontWeight: '600' },
+
+  inviteActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    paddingTop: 12,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 4,
+  },
+  acceptButton: { backgroundColor: '#10B981' },
+  actionButtonText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  declineButton: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#FECACA' },
+  declineButtonText: { color: '#EF4444', fontSize: 13, fontWeight: '600' },
 });
