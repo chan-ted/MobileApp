@@ -53,6 +53,7 @@ export default function EventDetailScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [startTime, setStartTime] = useState('');
+  const [creatorId, setCreatorId] = useState<string | null>(null);
   const [creatorName, setCreatorName] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
   const [originalDescription, setOriginalDescription] = useState('');
@@ -88,6 +89,7 @@ export default function EventDetailScreen() {
         setStartTime(eventData.start_time);
         setOriginalTitle(eventData.title);
         setOriginalDescription(eventData.description || '');
+        setCreatorId(eventData.created_by);
 
         if (eventData.created_by === user.id) {
           setIsOrganizer(true);
@@ -163,7 +165,6 @@ export default function EventDetailScreen() {
         .eq('user_id', userId)
         .select();
 
-      // If user isn't in event_participants yet, insert a record so unread tracking works
       if (!data || data.length === 0) {
         await supabase
           .from('event_participants')
@@ -203,14 +204,20 @@ export default function EventDetailScreen() {
 
       const profileMap = new Map(profileRows?.map(p => [p.id, p]) || []);
       
-      const combined: Participant[] = participantRows.map(p => ({
-        id: p.id,
-        user_id: p.user_id,
-        status: p.status,
-        profiles: profileMap.get(p.user_id) || { id: p.user_id, email: 'Unknown' },
-      }));
+      // Deduplicate participants by user_id to ensure no double entries
+      const uniqueParticipantsMap = new Map<string, Participant>();
+      participantRows.forEach(p => {
+        if (!uniqueParticipantsMap.has(p.user_id)) {
+          uniqueParticipantsMap.set(p.user_id, {
+            id: p.id,
+            user_id: p.user_id,
+            status: p.status,
+            profiles: profileMap.get(p.user_id) || { id: p.user_id, email: 'Unknown' },
+          });
+        }
+      });
 
-      setParticipants(combined);
+      setParticipants(Array.from(uniqueParticipantsMap.values()));
     } catch (error: any) {
       console.error('Error fetching participants:', error.message);
     }
@@ -487,26 +494,36 @@ export default function EventDetailScreen() {
 
                 {/* Participant Chips */}
                 <View style={styles.chipsContainer}>
-                  {participants.map(p => (
-                    <View key={p.id} style={styles.chip}>
-                      <Text style={styles.chipText} numberOfLines={1}>
-                        {p.profiles?.full_name || p.profiles?.email}
-                      </Text>
+                  {participants.map(p => {
+                    const isCreator = p.user_id === creatorId;
+                    return (
+                      <View key={p.id} style={[styles.chip, isCreator && styles.organizerChip]}>
+                        <Text style={styles.chipText} numberOfLines={1}>
+                          {p.profiles?.full_name || p.profiles?.email}
+                        </Text>
 
-                      <View style={[
-                        styles.statusDot, 
-                        p.status === 'accepted' ? styles.dotAccepted : 
-                        p.status === 'declined' ? styles.dotDeclined : styles.dotPending
-                      ]} />
+                        {/* Special Organizer Badge inside chip */}
+                        {isCreator && (
+                          <View style={styles.organizerBadge}>
+                            <Text style={styles.organizerBadgeText}>Organizer</Text>
+                          </View>
+                        )}
 
-                      {/* Remove button enabled ONLY when organizer AND editing mode is active */}
-                      {isOrganizer && isEditing && (
-                        <TouchableOpacity onPress={() => removeParticipant(p.id)} style={styles.chipRemove}>
-                          <Ionicons name="close-circle" size={16} color="#888" />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  ))}
+                        <View style={[
+                          styles.statusDot, 
+                          p.status === 'accepted' ? styles.dotAccepted : 
+                          p.status === 'declined' ? styles.dotDeclined : styles.dotPending
+                        ]} />
+
+                        {/* Remove button: Organizer can remove participants, but CANNOT remove themselves */}
+                        {isOrganizer && isEditing && !isCreator && (
+                          <TouchableOpacity onPress={() => removeParticipant(p.id)} style={styles.chipRemove}>
+                            <Ionicons name="close-circle" size={16} color="#888" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
                 </View>
 
                 {/* Search & Add Participants enabled ONLY when organizer AND editing mode is active */}
@@ -622,7 +639,10 @@ const styles = StyleSheet.create({
   // Chips & Participants
   chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   chip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 16, gap: 6 },
-  chipText: { fontSize: 13, color: '#333', fontWeight: '500', maxWidth: 160 },
+  organizerChip: { backgroundColor: '#EBF3FF', borderWidth: 1, borderColor: '#CCE0FF' },
+  organizerBadge: { backgroundColor: '#007AFF', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 4 },
+  organizerBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+  chipText: { fontSize: 13, color: '#333', fontWeight: '500', maxWidth: 140 },
   chipRemove: { marginLeft: 2 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   dotAccepted: { backgroundColor: '#10B981' },
