@@ -14,6 +14,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 
 type Profile = {
   id: string;
@@ -53,10 +54,19 @@ export default function EventDetailScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [creatorName, setCreatorName] = useState('');
+  
+  // Picker visibility toggles (mainly for iOS inline display)
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  // Original states for cancel revert
   const [originalTitle, setOriginalTitle] = useState('');
   const [originalDescription, setOriginalDescription] = useState('');
+  const [originalStartTime, setOriginalStartTime] = useState('');
+  const [originalEndTime, setOriginalEndTime] = useState('');
 
   // Participants States
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -75,7 +85,7 @@ export default function EventDetailScreen() {
         if (!user) return;
         setCurrentUserId(user.id);
 
-        // 1. Fetch Event Details (Simple query without joins)
+        // 1. Fetch Event Details
         const { data: eventData, error: eventError } = await supabase
           .from('events')
           .select('*')
@@ -86,9 +96,14 @@ export default function EventDetailScreen() {
 
         setTitle(eventData.title);
         setDescription(eventData.description || '');
-        setStartTime(eventData.start_time);
+        setStartTime(eventData.start_time || '');
+        setEndTime(eventData.end_time || '');
+
         setOriginalTitle(eventData.title);
         setOriginalDescription(eventData.description || '');
+        setOriginalStartTime(eventData.start_time || '');
+        setOriginalEndTime(eventData.end_time || '');
+
         setCreatorId(eventData.created_by);
 
         if (eventData.created_by === user.id) {
@@ -180,6 +195,65 @@ export default function EventDetailScreen() {
     }
   }
 
+  // --- Cross-Platform Picker Handlers ---
+  const handlePickStartTime = () => {
+    const current = startTime ? new Date(startTime) : new Date();
+
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: current,
+        mode: 'date',
+        onChange: (event, selectedDate) => {
+          if (event.type === 'set' && selectedDate) {
+            DateTimePickerAndroid.open({
+              value: selectedDate,
+              mode: 'time',
+              onChange: (timeEvent, selectedTime) => {
+                if (timeEvent.type === 'set' && selectedTime) {
+                  const combined = new Date(selectedDate);
+                  combined.setHours(selectedTime.getHours());
+                  combined.setMinutes(selectedTime.getMinutes());
+                  setStartTime(combined.toISOString());
+                }
+              },
+            });
+          }
+        },
+      });
+    } else {
+      setShowStartPicker(true);
+    }
+  };
+
+  const handlePickEndTime = () => {
+    const current = endTime ? new Date(endTime) : (startTime ? new Date(startTime) : new Date());
+
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: current,
+        mode: 'date',
+        onChange: (event, selectedDate) => {
+          if (event.type === 'set' && selectedDate) {
+            DateTimePickerAndroid.open({
+              value: selectedDate,
+              mode: 'time',
+              onChange: (timeEvent, selectedTime) => {
+                if (timeEvent.type === 'set' && selectedTime) {
+                  const combined = new Date(selectedDate);
+                  combined.setHours(selectedTime.getHours());
+                  combined.setMinutes(selectedTime.getMinutes());
+                  setEndTime(combined.toISOString());
+                }
+              },
+            });
+          }
+        },
+      });
+    } else {
+      setShowEndPicker(true);
+    }
+  };
+
   // --- Data Fetching Helpers ---
   async function fetchParticipants() {
     try {
@@ -204,7 +278,6 @@ export default function EventDetailScreen() {
 
       const profileMap = new Map(profileRows?.map(p => [p.id, p]) || []);
       
-      // Deduplicate participants by user_id to ensure no double entries
       const uniqueParticipantsMap = new Map<string, Participant>();
       participantRows.forEach(p => {
         if (!uniqueParticipantsMap.has(p.user_id)) {
@@ -332,6 +405,8 @@ export default function EventDetailScreen() {
         .update({
           title: title.trim(),
           description: description.trim(),
+          start_time: startTime.trim(),
+          end_time: endTime.trim() || null,
         })
         .eq('id', id);
 
@@ -339,6 +414,8 @@ export default function EventDetailScreen() {
 
       setOriginalTitle(title);
       setOriginalDescription(description);
+      setOriginalStartTime(startTime);
+      setOriginalEndTime(endTime);
       setIsEditing(false);
       Alert.alert('Success', 'Event details updated!');
     } catch (error: any) {
@@ -349,6 +426,8 @@ export default function EventDetailScreen() {
   function handleCancelEdit() {
     setTitle(originalTitle);
     setDescription(originalDescription);
+    setStartTime(originalStartTime);
+    setEndTime(originalEndTime);
     setIsEditing(false);
     setSearchQuery('');
     setSearchResults([]);
@@ -483,9 +562,79 @@ export default function EventDetailScreen() {
                   <Text style={styles.valueText}>{description || 'No description provided.'}</Text>
                 )}
 
-                {/* Start Time */}
+                {/* Start Time Section */}
                 <Text style={styles.label}>Start Time</Text>
-                <Text style={styles.valueText}>🕒 {new Date(startTime).toLocaleString()}</Text>
+                {isEditing ? (
+                  <View>
+                    <TouchableOpacity 
+                      style={styles.datePickerButton} 
+                      onPress={handlePickStartTime}
+                    >
+                      <Text style={styles.datePickerButtonText}>
+                        🕒 {startTime ? new Date(startTime).toLocaleString() : 'Select Start Time'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* iOS Inline DateTime Picker */}
+                    {Platform.OS === 'ios' && showStartPicker && (
+                      <View style={{ marginTop: 8 }}>
+                        <DateTimePicker
+                          value={startTime ? new Date(startTime) : new Date()}
+                          mode="datetime"
+                          display="spinner"
+                          onChange={(event, selectedDate) => {
+                            if (selectedDate) setStartTime(selectedDate.toISOString());
+                          }}
+                        />
+                        <TouchableOpacity 
+                          style={styles.donePickerButton} 
+                          onPress={() => setShowStartPicker(false)}
+                        >
+                          <Text style={styles.donePickerButtonText}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  <Text style={styles.valueText}>🕒 {startTime ? new Date(startTime).toLocaleString() : 'Not set'}</Text>
+                )}
+
+                {/* End Time Section */}
+                <Text style={styles.label}>End Time</Text>
+                {isEditing ? (
+                  <View>
+                    <TouchableOpacity 
+                      style={styles.datePickerButton} 
+                      onPress={handlePickEndTime}
+                    >
+                      <Text style={styles.datePickerButtonText}>
+                        🏁 {endTime ? new Date(endTime).toLocaleString() : 'Select End Time'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* iOS Inline DateTime Picker */}
+                    {Platform.OS === 'ios' && showEndPicker && (
+                      <View style={{ marginTop: 8 }}>
+                        <DateTimePicker
+                          value={endTime ? new Date(endTime) : (startTime ? new Date(startTime) : new Date())}
+                          mode="datetime"
+                          display="spinner"
+                          onChange={(event, selectedDate) => {
+                            if (selectedDate) setEndTime(selectedDate.toISOString());
+                          }}
+                        />
+                        <TouchableOpacity 
+                          style={styles.donePickerButton} 
+                          onPress={() => setShowEndPicker(false)}
+                        >
+                          <Text style={styles.donePickerButtonText}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  <Text style={styles.valueText}>🏁 {endTime ? new Date(endTime).toLocaleString() : 'Not set'}</Text>
+                )}
               </View>
 
               {/* Participants Card */}
@@ -502,7 +651,6 @@ export default function EventDetailScreen() {
                           {p.profiles?.full_name || p.profiles?.email}
                         </Text>
 
-                        {/* Special Organizer Badge inside chip */}
                         {isCreator && (
                           <View style={styles.organizerBadge}>
                             <Text style={styles.organizerBadgeText}>Organizer</Text>
@@ -515,7 +663,6 @@ export default function EventDetailScreen() {
                           p.status === 'declined' ? styles.dotDeclined : styles.dotPending
                         ]} />
 
-                        {/* Remove button: Organizer can remove participants, but CANNOT remove themselves */}
                         {isOrganizer && isEditing && !isCreator && (
                           <TouchableOpacity onPress={() => removeParticipant(p.id)} style={styles.chipRemove}>
                             <Ionicons name="close-circle" size={16} color="#888" />
@@ -526,7 +673,7 @@ export default function EventDetailScreen() {
                   })}
                 </View>
 
-                {/* Search & Add Participants enabled ONLY when organizer AND editing mode is active */}
+                {/* Search & Add Participants */}
                 {isOrganizer && isEditing && (
                   <View style={styles.addParticipantSection}>
                     <Text style={styles.label}>Invite New Participant</Text>
@@ -560,7 +707,7 @@ export default function EventDetailScreen() {
                   </View>
                 )}
 
-                {/* Save / Cancel Controls placed under participants card */}
+                {/* Save / Cancel Controls */}
                 {isEditing && (
                   <View style={styles.editActionRow}>
                     <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
@@ -630,6 +777,10 @@ const styles = StyleSheet.create({
   valueText: { fontSize: 15, color: '#111', fontWeight: '500', marginTop: 2 },
   input: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#DDD', padding: 10, borderRadius: 8, fontSize: 15, color: '#111', marginTop: 4 },
   textArea: { height: 80, textAlignVertical: 'top' },
+  datePickerButton: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#DDD', padding: 12, borderRadius: 8, marginTop: 4 },
+  datePickerButtonText: { fontSize: 15, color: '#111', fontWeight: '500' },
+  donePickerButton: { backgroundColor: '#007AFF', padding: 6, borderRadius: 6, alignItems: 'center', marginTop: 6 },
+  donePickerButtonText: { color: '#FFF', fontWeight: '600', fontSize: 13 },
   editActionRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   cancelButton: { flex: 1, backgroundColor: '#F1F3F5', padding: 12, borderRadius: 8, alignItems: 'center' },
   cancelButtonText: { color: '#495057', fontWeight: '600' },
