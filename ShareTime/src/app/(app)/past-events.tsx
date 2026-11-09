@@ -6,7 +6,8 @@ import {
   TouchableOpacity, 
   StyleSheet, 
   ActivityIndicator, 
-  RefreshControl 
+  RefreshControl,
+  Alert 
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -27,7 +28,6 @@ export default function PastEventsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Fetch past events when the screen loads
   useEffect(() => {
     fetchPastEvents();
   }, []);
@@ -35,19 +35,50 @@ export default function PastEventsScreen() {
   async function fetchPastEvents() {
     try {
       setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const nowIso = new Date().toISOString();
 
-      // Query events where the start time is in the past
-      const { data, error } = await supabase
+      // 1. Fetch past events created by the user
+      const { data: createdEvents, error: createdError } = await supabase
         .from('events')
         .select('*')
-        .lt('start_time', nowIso)
-        .order('start_time', { ascending: false });
+        .eq('created_by', user.id)
+        .lt('start_time', nowIso);
 
-      if (error) throw error;
-      setEvents(data || []);
+      if (createdError) throw createdError;
+
+      // 2. Fetch past events where the user is a participant
+      const { data: participantRows, error: partError } = await supabase
+        .from('event_participants')
+        .select('event_id, events(*)')
+        .eq('user_id', user.id);
+
+      if (partError) throw partError;
+
+      // Extract events from participant relation and filter for past start times
+      const participatingEvents = (participantRows || [])
+        .map((p: any) => p.events)
+        .filter((e: any) => e && e.start_time < nowIso);
+
+      // 3. Combine both lists and deduplicate by event ID using a Map
+      const eventMap = new Map<string, EventItem>();
+      [...(createdEvents || []), ...participatingEvents].forEach((ev) => {
+        if (ev && !eventMap.has(ev.id)) {
+          eventMap.set(ev.id, ev);
+        }
+      });
+
+      // Convert map back to array and sort by start_time descending (most recent first)
+      const uniquePastEvents = Array.from(eventMap.values()).sort(
+        (a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
+      );
+
+      setEvents(uniquePastEvents);
     } catch (error: any) {
       console.error('Error fetching past events:', error.message);
+      Alert.alert('Error', 'Could not load past events.');
     } finally {
       setLoading(false);
       setRefreshing(false);
