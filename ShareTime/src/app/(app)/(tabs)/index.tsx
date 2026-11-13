@@ -164,6 +164,14 @@ export default function EventsHomeScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity 
+          style={styles.historyButton} 
+          onPress={() => router.push('/upcoming-events' as any)}
+        >
+          <Ionicons name="time-outline" size={16} color="#007AFF" />
+          <Text style={styles.historyButtonText}>Upcoming Events</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
           style={styles.createButton} 
           onPress={() => router.push('/create-event' as any)}
         >
