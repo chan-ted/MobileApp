@@ -32,7 +32,7 @@ function getWeatherBackgroundImage(weatherCode: number) {
     case 1:
     case 2:
     case 3:
-      return { uri: 'https://images.unsplash.com/photo-1534088568595-a066fa41088a?q=80&w=1000&auto=format&fit=crop' }; // Cloudy
+      return { uri: 'https://images.pexels.com/photos/158163/clouds-cloudporn-weather-lookup-158163.jpeg?auto=compress&cs=tinysrgb&w=1080' }; // Cloudy
     case 45:
     case 48:
       return { uri: 'https://images.unsplash.com/photo-1485236715568-ddc5ee6ca227?q=80&w=1000&auto=format&fit=crop' }; // Foggy
@@ -55,7 +55,7 @@ function getWeatherBackgroundImage(weatherCode: number) {
     case 95:
     case 96:
     case 99:
-      return { uri: 'https://images.unsplash.com/photo-1605727216801-e27ce180cc28?q=80&w=1000&auto=format&fit=crop' }; // Stormy
+      return { uri: 'https://images.pexels.com/photos/1118873/pexels-photo-1118873.jpeg?auto=compress&cs=tinysrgb&w=1080' }; // Stormy
     default:
       return { uri: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1000&auto=format&fit=crop' };
   }
