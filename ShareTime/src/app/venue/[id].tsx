@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,6 +43,10 @@ export default function VenueDetailScreen() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Search state
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Edit state (only used when viewer is creator)
   const [isEditing, setIsEditing] = useState(false);
@@ -96,6 +102,27 @@ export default function VenueDetailScreen() {
     fetchVenueAndEvents(false);
   }, [fetchVenueAndEvents]);
 
+  async function handleOpenVenueInMap() {
+    if (!venue?.name.trim()) return;
+
+    const encodedQuery = encodeURIComponent(venue.name.trim());
+    const mapUrl =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?q=${encodedQuery}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodedQuery}`;
+
+    try {
+      const supported = await Linking.canOpenURL(mapUrl);
+      if (supported) {
+        await Linking.openURL(mapUrl);
+      } else {
+        await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodedQuery}`);
+      }
+    } catch {
+      Alert.alert('Map Error', 'Could not open map application.');
+    }
+  }
+
   async function handleSaveVenue() {
     if (!venue) return;
 
@@ -144,6 +171,13 @@ export default function VenueDetailScreen() {
     setIsEditing(false);
   }
 
+  function toggleSearch() {
+    setShowSearch(prev => {
+      if (prev) setSearchQuery('');
+      return !prev;
+    });
+  }
+
   function formatEventRange(startIso: string, endIso: string) {
     const start = new Date(startIso);
     const end = new Date(endIso);
@@ -156,6 +190,15 @@ export default function VenueDetailScreen() {
     const endTime = end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return `${datePart} · ${startTime} – ${endTime}`;
   }
+
+  const filteredEvents = events.filter(event => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      event.title.toLowerCase().includes(q) ||
+      (event.description?.toLowerCase().includes(q) ?? false)
+    );
+  });
 
   if (loading) {
     return (
@@ -184,12 +227,26 @@ export default function VenueDetailScreen() {
         <RefreshControl refreshing={refreshing} onRefresh={() => fetchVenueAndEvents(true)} />
       }
     >
+      {/* Top Navigation Row */}
+      <View style={styles.topNavRow}>
+        <TouchableOpacity style={styles.navBackBtn} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={20} color="#111" />
+        </TouchableOpacity>
+        <Text style={styles.navHeaderTitle}>Venue Details</Text>
+        <View style={{ width: 38 }} />
+      </View>
+
       {/* Venue Card */}
       <View style={styles.card}>
         <View style={styles.headerRow}>
-          <View style={styles.iconBadge}>
+          <TouchableOpacity
+            style={styles.iconBadge}
+            onPress={handleOpenVenueInMap}
+            activeOpacity={0.75}
+            accessibilityLabel={`Search ${venue.name} in map`}
+          >
             <Ionicons name="location" size={22} color="#007AFF" />
-          </View>
+          </TouchableOpacity>
 
           {isCreator && !isEditing && (
             <TouchableOpacity
@@ -247,12 +304,28 @@ export default function VenueDetailScreen() {
           </View>
         ) : (
           <>
-            <Text style={styles.venueTitle}>{venue.name}</Text>
+            {/* Venue Name + Search Button Beside It */}
+            <View style={styles.titleRow}>
+              <Text style={styles.venueTitle}>{venue.name}</Text>
+              <TouchableOpacity
+                style={[styles.searchIconBtn, showSearch && styles.searchIconBtnActive]}
+                onPress={toggleSearch}
+                accessibilityLabel="Search events at this venue"
+              >
+                <Ionicons
+                  name={showSearch ? 'close' : 'search'}
+                  size={18}
+                  color={showSearch ? '#FFF' : '#007AFF'}
+                />
+              </TouchableOpacity>
+            </View>
+
             {isCreator && (
               <View style={styles.creatorTag}>
                 <Text style={styles.creatorTagText}>Created by you</Text>
               </View>
             )}
+
             <Text style={styles.venueDescription}>
               {venue.description?.trim()
                 ? venue.description
@@ -262,18 +335,44 @@ export default function VenueDetailScreen() {
         )}
       </View>
 
+      {/* Expandable Search Input */}
+      {showSearch && (
+        <View style={styles.searchBarContainer}>
+          <Ionicons name="search-outline" size={18} color="#888" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder={`Search events at ${venue.name}...`}
+            placeholderTextColor="#999"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color="#888" />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       {/* Events at This Venue */}
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Events at This Venue ({events.length})</Text>
+        <Text style={styles.sectionTitle}>
+          Events at This Venue ({filteredEvents.length})
+        </Text>
       </View>
 
-      {events.length === 0 ? (
+      {filteredEvents.length === 0 ? (
         <View style={styles.emptyEventsCard}>
           <Ionicons name="calendar-clear-outline" size={28} color="#8E8E93" />
-          <Text style={styles.emptyText}>No events scheduled here yet.</Text>
+          <Text style={styles.emptyText}>
+            {searchQuery.trim()
+              ? 'No matching events found at this venue.'
+              : 'No events scheduled here yet.'}
+          </Text>
         </View>
       ) : (
-        events.map(event => (
+        filteredEvents.map(event => (
           <TouchableOpacity
             key={event.id}
             style={styles.eventCard}
@@ -313,6 +412,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F9FA',
     padding: 24,
   },
+  topNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  navBackBtn: {
+    backgroundColor: '#FFF',
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+  },
+  navHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111',
+  },
   card: {
     backgroundColor: '#FFF',
     borderRadius: 12,
@@ -348,9 +465,44 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   venueTitle: {
+    flex: 1,
     fontSize: 22,
     fontWeight: '700',
+    color: '#111',
+  },
+  searchIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EBF3FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchIconBtnActive: {
+    backgroundColor: '#007AFF',
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginTop: 12,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 15,
     color: '#111',
   },
   creatorTag: {
@@ -359,7 +511,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
-    marginTop: 6,
+    marginTop: 8,
   },
   creatorTagText: {
     fontSize: 12,
