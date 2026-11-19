@@ -22,6 +22,12 @@ type Profile = {
   full_name?: string;
 };
 
+type Venue = {
+  id: string;
+  name: string;
+  description?: string | null;
+};
+
 type Participant = {
   id: string;
   user_id: string;
@@ -55,9 +61,16 @@ export default function EventDetailScreen() {
   const [description, setDescription] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
+  const [venue, setVenue] = useState<Venue | null>(null);
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [creatorName, setCreatorName] = useState('');
-  
+
+  // Venue Edit States
+  const [editVenueQuery, setEditVenueQuery] = useState('');
+  const [editVenueResults, setEditVenueResults] = useState<Venue[]>([]);
+  const [selectedEditVenue, setSelectedEditVenue] = useState<Venue | null>(null);
+  const [isSearchingVenues, setIsSearchingVenues] = useState(false);
+
   // Picker visibility toggles (mainly for iOS inline display)
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
@@ -67,6 +80,7 @@ export default function EventDetailScreen() {
   const [originalDescription, setOriginalDescription] = useState('');
   const [originalStartTime, setOriginalStartTime] = useState('');
   const [originalEndTime, setOriginalEndTime] = useState('');
+  const [originalVenue, setOriginalVenue] = useState<Venue | null>(null);
 
   // Participants States
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -110,7 +124,24 @@ export default function EventDetailScreen() {
           setIsOrganizer(true);
         }
 
-        // 2. Fetch Creator Profile via 2-step query
+        // 2. Fetch Linked Venue if present
+        let loadedVenue: Venue | null = null;
+        if (eventData.venue_id) {
+          const { data: venueData } = await supabase
+            .from('venues')
+            .select('id, name, description')
+            .eq('id', eventData.venue_id)
+            .single();
+
+          loadedVenue = venueData || null;
+        }
+
+        setVenue(loadedVenue);
+        setOriginalVenue(loadedVenue);
+        setSelectedEditVenue(loadedVenue);
+        setEditVenueQuery(loadedVenue?.name || '');
+
+        // 3. Fetch Creator Profile via 2-step query
         const { data: creatorProfile } = await supabase
           .from('profiles')
           .select('email, full_name')
@@ -119,10 +150,10 @@ export default function EventDetailScreen() {
 
         setCreatorName(creatorProfile?.full_name || creatorProfile?.email || 'Unknown Organizer');
 
-        // 3. Mark event messages as read immediately upon opening
+        // 4. Mark event messages as read immediately upon opening
         await markAsRead(id, user.id);
 
-        // 4. Fetch Participants & Messages
+        // 5. Fetch Participants & Messages
         await fetchParticipants();
         await fetchMessages();
       } catch (error: any) {
@@ -134,7 +165,7 @@ export default function EventDetailScreen() {
 
     init();
 
-    // 5. Realtime Chat Subscription
+    // 6. Realtime Chat Subscription
     const channel = supabase
       .channel(`chat:${id}`)
       .on(
@@ -193,6 +224,46 @@ export default function EventDetailScreen() {
     } catch (err) {
       console.error('Error marking event as read:', err);
     }
+  }
+
+  // --- Venue Search & Selection While Editing ---
+  async function handleEditVenueSearch(text: string) {
+    setEditVenueQuery(text);
+    setSelectedEditVenue(null);
+
+    if (text.trim().length < 1) {
+      setEditVenueResults([]);
+      return;
+    }
+
+    setIsSearchingVenues(true);
+    try {
+      const { data, error } = await supabase
+        .from('venues')
+        .select('id, name, description')
+        .ilike('name', `%${text.trim()}%`)
+        .order('name', { ascending: true })
+        .limit(6);
+
+      if (error) throw error;
+      setEditVenueResults(data || []);
+    } catch (err: any) {
+      console.error('Error searching venues:', err.message);
+    } finally {
+      setIsSearchingVenues(false);
+    }
+  }
+
+  function handleSelectEditVenue(item: Venue) {
+    setSelectedEditVenue(item);
+    setEditVenueQuery(item.name);
+    setEditVenueResults([]);
+  }
+
+  function handleClearEditVenue() {
+    setSelectedEditVenue(null);
+    setEditVenueQuery('');
+    setEditVenueResults([]);
   }
 
   // --- Cross-Platform Picker Handlers ---
@@ -392,7 +463,7 @@ export default function EventDetailScreen() {
     }
   }
 
-  // --- Event Edit Logic ---
+  // --- Event Edit Logic (including Venue) ---
   async function handleSaveEdits() {
     if (!title.trim()) {
       Alert.alert('Error', 'Title cannot be empty.');
@@ -400,6 +471,25 @@ export default function EventDetailScreen() {
     }
 
     try {
+      let resolvedVenue: Venue | null = selectedEditVenue;
+      const trimmedVenueText = editVenueQuery.trim();
+
+      if (!resolvedVenue && trimmedVenueText.length > 0) {
+        if (!currentUserId) throw new Error('Not authenticated');
+
+        const { data: createdVenue, error: venueCreateError } = await supabase
+          .from('venues')
+          .insert({
+            name: trimmedVenueText,
+            creator_id: currentUserId,
+          })
+          .select('id, name, description')
+          .single();
+
+        if (venueCreateError) throw venueCreateError;
+        resolvedVenue = createdVenue;
+      }
+
       const { error } = await supabase
         .from('events')
         .update({
@@ -407,10 +497,17 @@ export default function EventDetailScreen() {
           description: description.trim(),
           start_time: startTime.trim(),
           end_time: endTime.trim() || null,
+          venue_id: resolvedVenue ? resolvedVenue.id : null,
         })
         .eq('id', id);
 
       if (error) throw error;
+
+      setVenue(resolvedVenue);
+      setOriginalVenue(resolvedVenue);
+      setSelectedEditVenue(resolvedVenue);
+      setEditVenueQuery(resolvedVenue?.name || '');
+      setEditVenueResults([]);
 
       setOriginalTitle(title);
       setOriginalDescription(description);
@@ -428,6 +525,10 @@ export default function EventDetailScreen() {
     setDescription(originalDescription);
     setStartTime(originalStartTime);
     setEndTime(originalEndTime);
+    setVenue(originalVenue);
+    setSelectedEditVenue(originalVenue);
+    setEditVenueQuery(originalVenue?.name || '');
+    setEditVenueResults([]);
     setIsEditing(false);
     setSearchQuery('');
     setSearchResults([]);
@@ -536,6 +637,74 @@ export default function EventDetailScreen() {
                 {/* Organizer Info */}
                 <Text style={styles.label}>Organizer</Text>
                 <Text style={styles.valueText}>👤 {creatorName}</Text>
+
+                {/* Venue Info & Link */}
+                <Text style={styles.label}>Venue</Text>
+                {isEditing ? (
+                  <View>
+                    <View style={styles.searchContainer}>
+                      <Ionicons name="location-outline" size={16} color="#888" style={styles.searchIcon} />
+                      <TextInput
+                        style={styles.searchInput}
+                        placeholder="Search venue or type a new name..."
+                        placeholderTextColor="#999"
+                        value={editVenueQuery}
+                        onChangeText={handleEditVenueSearch}
+                      />
+                      {isSearchingVenues && <ActivityIndicator size="small" color="#007AFF" />}
+                      {editVenueQuery.length > 0 && !isSearchingVenues && (
+                        <TouchableOpacity onPress={handleClearEditVenue}>
+                          <Ionicons name="close-circle" size={18} color="#888" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    {editVenueResults.length > 0 && (
+                      <View style={styles.resultsContainer}>
+                        {editVenueResults.map(v => (
+                          <TouchableOpacity
+                            key={v.id}
+                            style={styles.resultItem}
+                            onPress={() => handleSelectEditVenue(v)}
+                          >
+                            <Text style={styles.resultEmail}>{v.name}</Text>
+                            <Ionicons name="checkmark-circle-outline" size={18} color="#007AFF" />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    <Text style={styles.helperNote}>
+                      {selectedEditVenue
+                        ? `Selected existing venue: ${selectedEditVenue.name}`
+                        : editVenueQuery.trim()
+                        ? `Will create new venue "${editVenueQuery.trim()}" on save`
+                        : 'No venue selected (will clear venue on save)'}
+                    </Text>
+                  </View>
+                ) : venue ? (
+                  <TouchableOpacity
+                    style={styles.venueLinkRow}
+                    activeOpacity={0.7}
+                    onPress={() => router.push(`/venue/${venue.id}` as any)}
+                  >
+                    <Ionicons name="location" size={16} color="#007AFF" />
+                    <Text style={styles.venueLinkText}>{venue.name}</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#007AFF" />
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.unassignedVenueRow}>
+                    <Text style={styles.valueText}>No venue assigned</Text>
+                    {isOrganizer && (
+                      <TouchableOpacity
+                        style={styles.assignVenueBtn}
+                        onPress={() => setIsEditing(true)}
+                      >
+                        <Text style={styles.assignVenueBtnText}>+ Add Venue</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
 
                 {/* Title */}
                 <Text style={styles.label}>Event Title</Text>
@@ -647,21 +816,27 @@ export default function EventDetailScreen() {
                     const isCreator = p.user_id === creatorId;
                     return (
                       <View key={p.id} style={[styles.chip, isCreator && styles.organizerChip]}>
-                        <Text style={styles.chipText} numberOfLines={1}>
-                          {p.profiles?.full_name || p.profiles?.email}
-                        </Text>
+                        <TouchableOpacity
+                          style={styles.chipLinkArea}
+                          activeOpacity={0.7}
+                          onPress={() => router.push(`/profile/${p.user_id}` as any)}
+                        >
+                          <Text style={styles.chipText} numberOfLines={1}>
+                            {p.profiles?.full_name || p.profiles?.email}
+                          </Text>
 
-                        {isCreator && (
-                          <View style={styles.organizerBadge}>
-                            <Text style={styles.organizerBadgeText}>Organizer</Text>
-                          </View>
-                        )}
+                          {isCreator && (
+                            <View style={styles.organizerBadge}>
+                              <Text style={styles.organizerBadgeText}>Organizer</Text>
+                            </View>
+                          )}
 
-                        <View style={[
-                          styles.statusDot, 
-                          p.status === 'accepted' ? styles.dotAccepted : 
-                          p.status === 'declined' ? styles.dotDeclined : styles.dotPending
-                        ]} />
+                          <View style={[
+                            styles.statusDot, 
+                            p.status === 'accepted' ? styles.dotAccepted : 
+                            p.status === 'declined' ? styles.dotDeclined : styles.dotPending
+                          ]} />
+                        </TouchableOpacity>
 
                         {isOrganizer && isEditing && !isCreator && (
                           <TouchableOpacity onPress={() => removeParticipant(p.id)} style={styles.chipRemove}>
@@ -775,6 +950,40 @@ const styles = StyleSheet.create({
   badgeText: { color: '#0369A1', fontSize: 11, fontWeight: '600' },
   label: { fontSize: 12, fontWeight: '600', color: '#666', marginTop: 10 },
   valueText: { fontSize: 15, color: '#111', fontWeight: '500', marginTop: 2 },
+  venueLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#EBF3FF',
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  venueLinkText: { fontSize: 15, color: '#007AFF', fontWeight: '600' },
+  unassignedVenueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  assignVenueBtn: {
+    backgroundColor: '#EBF3FF',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+  },
+  assignVenueBtnText: {
+    color: '#007AFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  helperNote: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 6,
+  },
   input: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#DDD', padding: 10, borderRadius: 8, fontSize: 15, color: '#111', marginTop: 4 },
   textArea: { height: 80, textAlignVertical: 'top' },
   datePickerButton: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#DDD', padding: 12, borderRadius: 8, marginTop: 4 },
@@ -790,6 +999,7 @@ const styles = StyleSheet.create({
   // Chips & Participants
   chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   chip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 16, gap: 6 },
+  chipLinkArea: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   organizerChip: { backgroundColor: '#EBF3FF', borderWidth: 1, borderColor: '#CCE0FF' },
   organizerBadge: { backgroundColor: '#007AFF', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 4 },
   organizerBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },

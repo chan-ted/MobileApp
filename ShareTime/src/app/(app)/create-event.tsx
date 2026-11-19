@@ -22,6 +22,12 @@ type Profile = {
   full_name?: string;
 };
 
+type Venue = {
+  id: string;
+  name: string;
+  creator_id?: string;
+};
+
 export default function CreateEventScreen() {
   const router = useRouter();
   
@@ -35,6 +41,13 @@ export default function CreateEventScreen() {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
   const [activeField, setActiveField] = useState<'start' | 'end'>('start');
+
+  // Venue Search & Creation States
+  const [venueQuery, setVenueQuery] = useState('');
+  const [venueResults, setVenueResults] = useState<Venue[]>([]);
+  const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
+  const [createNewVenueMode, setCreateNewVenueMode] = useState(false);
+  const [isSearchingVenues, setIsSearchingVenues] = useState(false);
 
   // Participant Search & Selection States
   const [searchQuery, setSearchQuery] = useState('');
@@ -63,6 +76,55 @@ export default function CreateEventScreen() {
       }
     }
   };
+
+  // --- Venue Search & Selection Logic ---
+  async function handleVenueSearch(text: string) {
+    setVenueQuery(text);
+    setSelectedVenue(null);
+    setCreateNewVenueMode(false);
+
+    if (text.trim().length < 1) {
+      setVenueResults([]);
+      return;
+    }
+
+    setIsSearchingVenues(true);
+    try {
+      const { data, error } = await supabase
+        .from('venues')
+        .select('id, name, creator_id')
+        .ilike('name', `%${text.trim()}%`)
+        .order('name', { ascending: true })
+        .limit(6);
+
+      if (error) throw error;
+      setVenueResults(data || []);
+    } catch (err: any) {
+      console.error('Error searching venues:', err.message);
+    } finally {
+      setIsSearchingVenues(false);
+    }
+  }
+
+  function selectExistingVenue(venue: Venue) {
+    setSelectedVenue(venue);
+    setVenueQuery(venue.name);
+    setVenueResults([]);
+    setCreateNewVenueMode(false);
+  }
+
+  function enableCreateNewVenue() {
+    setSelectedVenue(null);
+    setCreateNewVenueMode(true);
+    setVenueResults([]);
+  }
+
+  function clearVenue() {
+    setSelectedVenue(null);
+    setVenueQuery('');
+    setVenueResults([]);
+    setCreateNewVenueMode(false);
+  }
 
   // --- Participant Search & Selection Logic ---
   async function handleSearch(text: string) {
@@ -106,7 +168,7 @@ export default function CreateEventScreen() {
     setSelectedParticipants(selectedParticipants.filter(p => p.id !== id));
   }
 
-  // --- Submit & Save Event + Participants ---
+  // --- Submit & Save Venue + Event + Participants ---
   async function handleCreateEvent() {
     if (!title.trim()) {
       Alert.alert('Error', 'Please enter an event title.');
@@ -118,19 +180,45 @@ export default function CreateEventScreen() {
       return;
     }
 
+    if (createNewVenueMode && !venueQuery.trim()) {
+      Alert.alert('Error', 'Please enter a name for the new venue.');
+      return;
+    }
+
     setIsSubmitting(true);
+    let newlyCreatedVenueId: string | null = null;
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // 1. Create the Event
+      // 1. Resolve venue_id: existing selected venue, newly created venue, or null
+      let resolvedVenueId: string | null = selectedVenue ? selectedVenue.id : null;
+
+      if (!resolvedVenueId && venueQuery.trim().length > 0) {
+        const { data: createdVenue, error: venueError } = await supabase
+          .from('venues')
+          .insert({
+            name: venueQuery.trim(),
+            creator_id: user.id,
+          })
+          .select('id, name')
+          .single();
+
+        if (venueError) throw venueError;
+        resolvedVenueId = createdVenue.id;
+        newlyCreatedVenueId = createdVenue.id;
+      }
+
+      // 2. Create the Event with resolved venue_id
       const { data: eventData, error: eventError } = await supabase
         .from('events')
         .insert({
-          title,
-          description,
+          title: title.trim(),
+          description: description.trim() || null,
           start_time: startDate.toISOString(),
           end_time: endDate.toISOString(),
+          venue_id: resolvedVenueId,
           created_by: user.id,
         })
         .select()
@@ -138,7 +226,7 @@ export default function CreateEventScreen() {
 
       if (eventError) throw eventError;
 
-      // 2. Batch-insert Invited Participants into event_participants junction table
+      // 3. Batch-insert Invited Participants into event_participants junction table
       if (selectedParticipants.length > 0) {
         const participantRows = selectedParticipants.map(profile => ({
           event_id: eventData.id,
@@ -155,11 +243,20 @@ export default function CreateEventScreen() {
 
       router.back();
     } catch (error: any) {
+      // Roll back newly created venue if event or participant creation fails
+      if (newlyCreatedVenueId) {
+        await supabase.from('venues').delete().eq('id', newlyCreatedVenueId);
+      }
       Alert.alert('Error', error.message);
     } finally {
       setIsSubmitting(false);
     }
   }
+
+  const trimmedVenueQuery = venueQuery.trim();
+  const hasExactMatch = venueResults.some(
+    v => v.name.trim().toLowerCase() === trimmedVenueQuery.toLowerCase()
+  );
 
   return (
     <KeyboardAvoidingView 
@@ -221,6 +318,71 @@ export default function CreateEventScreen() {
             display="default"
             onChange={onDateChange}
           />
+        )}
+
+        {/* --- Venue Section --- */}
+        <Text style={styles.label}>Venue (Search or Add New)</Text>
+
+        <View style={styles.searchContainer}>
+          <Ionicons name="location-outline" size={18} color="#888" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search existing venue or type a new one..."
+            placeholderTextColor="#999"
+            value={venueQuery}
+            onChangeText={handleVenueSearch}
+          />
+          {isSearchingVenues && <ActivityIndicator size="small" color="#007AFF" />}
+          {venueQuery.length > 0 && !isSearchingVenues && (
+            <TouchableOpacity onPress={clearVenue}>
+              <Ionicons name="close-circle" size={18} color="#888" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Selected Existing Venue Badge */}
+        {selectedVenue && (
+          <View style={styles.selectedVenueBadge}>
+            <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
+            <Text style={styles.selectedVenueText}>Using existing venue: {selectedVenue.name}</Text>
+          </View>
+        )}
+
+        {/* New Venue Mode Badge */}
+        {createNewVenueMode && trimmedVenueQuery.length > 0 && !selectedVenue && (
+          <View style={styles.newVenueBadge}>
+            <Ionicons name="add-circle" size={18} color="#007AFF" />
+            <Text style={styles.newVenueText}>Will create new venue: "{trimmedVenueQuery}"</Text>
+          </View>
+        )}
+
+        {/* Venue Search Results + Create Option */}
+        {!selectedVenue && trimmedVenueQuery.length > 0 && (venueResults.length > 0 || !hasExactMatch) && !createNewVenueMode && (
+          <View style={styles.resultsContainer}>
+            {venueResults.map(venue => (
+              <TouchableOpacity
+                key={venue.id}
+                style={styles.resultItem}
+                onPress={() => selectExistingVenue(venue)}
+              >
+                <View>
+                  <Text style={styles.resultEmail}>{venue.name}</Text>
+                  <Text style={styles.resultName}>Existing venue</Text>
+                </View>
+                <Ionicons name="return-down-forward" size={18} color="#007AFF" />
+              </TouchableOpacity>
+            ))}
+
+            {!hasExactMatch && (
+              <TouchableOpacity
+                style={styles.createVenueOption}
+                onPress={enableCreateNewVenue}
+              >
+                <Text style={styles.createVenueText}>+ Add "{trimmedVenueQuery}" as a new venue</Text>
+                <Ionicons name="add-circle-outline" size={20} color="#007AFF" />
+              </TouchableOpacity>
+            )}
+          </View>
         )}
 
         {/* --- Participants Section --- */}
@@ -295,7 +457,7 @@ const styles = StyleSheet.create({
     padding: 20, 
     flexGrow: 1, 
     paddingTop: 60,
-    paddingBottom: 150 // <-- Crucial: Gives extra space to scroll results above keyboard
+    paddingBottom: 150
   },
   headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#111', marginBottom: 20 },
   label: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 6, marginTop: 14 },
@@ -315,6 +477,36 @@ const styles = StyleSheet.create({
   },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: '#111' },
+  selectedVenueBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 8,
+  },
+  selectedVenueText: { fontSize: 13, color: '#15803D', fontWeight: '600' },
+  newVenueBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#EBF3FF',
+    borderRadius: 8,
+  },
+  newVenueText: { fontSize: 13, color: '#007AFF', fontWeight: '600' },
+  createVenueOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#F8FBFF',
+  },
+  createVenueText: { fontSize: 14, color: '#007AFF', fontWeight: '600' },
   resultsContainer: {
     backgroundColor: '#FFF',
     borderWidth: 1,
