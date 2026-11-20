@@ -10,10 +10,12 @@ import {
   Alert, 
   ScrollView,
   KeyboardAvoidingView,
-  Platform 
+  Platform,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { pickAndUploadAvatar } from '@/lib/uploadAvatar';
 import { Ionicons } from '@expo/vector-icons';
 
 type Profile = {
@@ -21,6 +23,7 @@ type Profile = {
   email: string;
   full_name?: string;
   bio?: string;
+  avatar_url?: string | null;
 };
 
 export default function MyProfileScreen() {
@@ -28,6 +31,7 @@ export default function MyProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [bio, setBio] = useState('');
@@ -57,6 +61,23 @@ export default function MyProfileScreen() {
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleChangeAvatar() {
+    if (!profile || uploadingAvatar) return;
+
+    try {
+      setUploadingAvatar(true);
+      const newAvatarUrl = await pickAndUploadAvatar(profile.id);
+      if (newAvatarUrl) {
+        setProfile(prev => (prev ? { ...prev, avatar_url: newAvatarUrl } : null));
+        Alert.alert('Success', 'Profile picture updated!');
+      }
+    } catch (error: any) {
+      Alert.alert('Upload Failed', error.message || 'Could not update profile picture.');
+    } finally {
+      setUploadingAvatar(false);
     }
   }
 
@@ -110,9 +131,39 @@ export default function MyProfileScreen() {
 
         <View style={styles.card}>
           <View style={styles.avatarContainer}>
-            <View style={styles.avatarCircle}>
-              <Ionicons name="person" size={40} color="#007AFF" />
-            </View>
+            <TouchableOpacity
+              style={styles.avatarTouchable}
+              onPress={handleChangeAvatar}
+              disabled={uploadingAvatar}
+              activeOpacity={0.8}
+              accessibilityLabel="Change profile picture"
+            >
+              {profile?.avatar_url ? (
+                <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+              ) : (
+                <View style={styles.avatarCircle}>
+                  <Ionicons name="person" size={40} color="#007AFF" />
+                </View>
+              )}
+
+              <View style={styles.cameraBadge}>
+                {uploadingAvatar ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Ionicons name="camera" size={16} color="#FFF" />
+                )}
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={handleChangeAvatar} disabled={uploadingAvatar}>
+              <Text style={styles.changePhotoLink}>
+                {uploadingAvatar
+                  ? 'Uploading...'
+                  : profile?.avatar_url
+                  ? 'Change Photo'
+                  : 'Upload Photo'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           <Text style={styles.label}>Email</Text>
@@ -178,7 +229,28 @@ const styles = StyleSheet.create({
   
   card: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#EFEFEF', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
   avatarContainer: { alignItems: 'center', marginBottom: 20 },
-  avatarCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#EBF3FF', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#CCE0FF' },
+  avatarTouchable: { position: 'relative' },
+  avatarImage: { width: 88, height: 88, borderRadius: 44, backgroundColor: '#E5E7EB', borderWidth: 2, borderColor: '#CCE0FF' },
+  avatarCircle: { width: 88, height: 88, borderRadius: 44, backgroundColor: '#EBF3FF', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#CCE0FF' },
+  cameraBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFF',
+  },
+  changePhotoLink: {
+    marginTop: 8,
+    color: '#007AFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
 
   label: { fontSize: 12, fontWeight: '600', color: '#666', marginTop: 14 },
   emailText: { fontSize: 15, color: '#333', fontWeight: '500', marginTop: 4 },
