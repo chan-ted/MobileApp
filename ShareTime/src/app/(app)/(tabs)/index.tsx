@@ -1,376 +1,520 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  StyleSheet, 
-  ActivityIndicator, 
-  FlatList, 
-  Alert 
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
+  ImageBackground,
+  Switch,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { User } from '@supabase/supabase-js';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 
-type CombinedEvent = {
+type EventStatus = 'accepted' | 'pending' | 'declined';
+
+type Next24hEventItem = {
   id: string;
   title: string;
-  description: string;
+  description?: string;
   start_time: string;
-  end_time: string;
+  end_time?: string;
   created_by: string;
   isOrganizer: boolean;
-  status: 'accepted' | 'pending' | 'declined';
+  status: EventStatus;
 };
+
+function getWeatherBackgroundImage(weatherCode: number) {
+  switch (weatherCode) {
+    case 0:
+      return { uri: 'https://images.unsplash.com/photo-1601297183305-6df142704ea2?q=80&w=1000&auto=format&fit=crop' };
+    case 1:
+    case 2:
+    case 3:
+      return { uri: 'https://images.pexels.com/photos/158163/clouds-cloudporn-weather-lookup-158163.jpeg?auto=compress&cs=tinysrgb&w=1080' };
+    case 45:
+    case 48:
+      return { uri: 'https://images.unsplash.com/photo-1485236715568-ddc5ee6ca227?q=80&w=1000&auto=format&fit=crop' };
+    case 51:
+    case 53:
+    case 55:
+    case 61:
+    case 63:
+    case 65:
+    case 80:
+    case 81:
+    case 82:
+      return { uri: 'https://images.unsplash.com/photo-1519692933481-e162a57d6721?q=80&w=1000&auto=format&fit=crop' };
+    case 71:
+    case 73:
+    case 75:
+    case 85:
+    case 86:
+      return { uri: 'https://images.unsplash.com/photo-1491002052546-bf38f186af56?q=80&w=1000&auto=format&fit=crop' };
+    case 95:
+    case 96:
+    case 99:
+      return { uri: 'https://images.pexels.com/photos/1118873/pexels-photo-1118873.jpeg?auto=compress&cs=tinysrgb&w=1080' };
+    default:
+      return { uri: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1000&auto=format&fit=crop' };
+  }
+}
+
+function getStatusBadgeStyle(isOrganizer: boolean, status: EventStatus) {
+  if (isOrganizer) {
+    return {
+      badge: styles.badgeOrganizer,
+      text: styles.badgeOrganizerText,
+      label: 'Organizer · Accepted',
+    };
+  }
+  if (status === 'accepted') {
+    return {
+      badge: styles.badgeAccepted,
+      text: styles.badgeAcceptedText,
+      label: 'Accepted',
+    };
+  }
+  if (status === 'declined') {
+    return {
+      badge: styles.badgeDeclined,
+      text: styles.badgeDeclinedText,
+      label: 'Declined',
+    };
+  }
+  return {
+    badge: styles.badgePending,
+    text: styles.badgePendingText,
+    label: 'Pending',
+  };
+}
 
 export default function EventsHomeScreen() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
-  
-  const [events, setEvents] = useState<CombinedEvent[]>([]);
-  const [loadingEvents, setLoadingEvents] = useState(true);
+  const [events, setEvents] = useState<Next24hEventItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showDeclined, setShowDeclined] = useState(true);
+
+  // Weather States for Today
+  const [weatherCode, setWeatherCode] = useState<number | null>(null);
+  const [temperature, setTemperature] = useState<number | null>(null);
+
+  const loadData = useCallback(async () => {
+    await Promise.all([fetchNext24hEvents(), fetchTodayWeather()]);
+  }, []);
 
   useEffect(() => {
-    async function initUser() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUser(user);
-        fetchAllEvents(user.id);
-      }
-      setLoadingUser(false);
-    }
-    initUser();
-  }, []);
+    loadData();
+  }, [loadData]);
 
   useFocusEffect(
     useCallback(() => {
-      if (user) {
-        fetchAllEvents(user.id);
-      }
-    }, [user])
+      fetchNext24hEvents();
+    }, [])
   );
 
-  async function fetchAllEvents(userId: string) {
-    setLoadingEvents(true);
+  async function fetchNext24hEvents() {
     try {
-      const nowIso = new Date().toISOString();
+      setLoading(true);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const next24HoursIso = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 
       const { data: createdEvents, error: createdError } = await supabase
         .from('events')
         .select('*')
-        .eq('created_by', userId)
-        .gte('start_time', nowIso);
+        .eq('created_by', user.id)
+        .gte('start_time', nowIso)
+        .lte('start_time', next24HoursIso);
 
       if (createdError) throw createdError;
 
-      const { data: invitedData, error: invitedError } = await supabase
+      const { data: participantRows, error: partError } = await supabase
         .from('event_participants')
-        .select(`
-          status,
-          events (
-            id,
-            title,
-            description,
-            start_time,
-            end_time,
-            created_by
-          )
-        `)
-        .eq('user_id', userId);
+        .select('event_id, status, events(*)')
+        .eq('user_id', user.id);
 
-      if (invitedError) throw invitedError;
+      if (partError) throw partError;
 
-      const formattedCreated: CombinedEvent[] = (createdEvents || []).map(ev => ({
-        ...ev,
-        isOrganizer: true,
-        status: 'accepted',
-      }));
+      const statusByEventId = new Map<string, EventStatus>();
+      (participantRows || []).forEach((p: any) => {
+        if (p.event_id && p.status) {
+          statusByEventId.set(p.event_id, p.status as EventStatus);
+        }
+      });
 
-      const createdIds = new Set(formattedCreated.map(e => e.id));
+      const eventMap = new Map<string, Next24hEventItem>();
 
-      const formattedInvited: CombinedEvent[] = (invitedData || [])
-        .filter((item: any) => item.events && !createdIds.has(item.events.id) && item.events.start_time >= nowIso)
-        .map((item: any) => ({
-          ...item.events,
-          isOrganizer: false,
-          status: item.status,
-        }));
+      (createdEvents || []).forEach((ev: any) => {
+        if (ev) {
+          eventMap.set(ev.id, {
+            ...ev,
+            isOrganizer: true,
+            status: statusByEventId.get(ev.id) || 'accepted',
+          });
+        }
+      });
 
-      const combined = [...formattedCreated, ...formattedInvited].sort(
+      (participantRows || []).forEach((p: any) => {
+        const ev = p.events;
+        if (
+          ev &&
+          ev.start_time >= nowIso &&
+          ev.start_time <= next24HoursIso &&
+          !eventMap.has(ev.id)
+        ) {
+          eventMap.set(ev.id, {
+            ...ev,
+            isOrganizer: ev.created_by === user.id,
+            status: (p.status as EventStatus) || 'pending',
+          });
+        }
+      });
+
+      const uniqueEvents = Array.from(eventMap.values()).sort(
         (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
       );
 
-      setEvents(combined);
+      setEvents(uniqueEvents);
     } catch (error: any) {
-      console.error('Error fetching events:', error.message);
+      console.error('Error fetching 24h events:', error.message);
     } finally {
-      setLoadingEvents(false);
+      setLoading(false);
+      setRefreshing(false);
     }
   }
 
-  async function handleUpdateInvitationStatus(eventId: string, newStatus: 'accepted' | 'declined') {
+  async function fetchTodayWeather() {
     try {
-      if (!user) return;
+      let lat = '56.4620';
+      let lon = '-2.9707';
 
-      const { error } = await supabase
-        .from('event_participants')
-        .update({ status: newStatus })
-        .eq('event_id', eventId)
-        .eq('user_id', user.id);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const currentLocation = await Location.getCurrentPositionAsync({});
+        lat = currentLocation.coords.latitude.toString();
+        lon = currentLocation.coords.longitude.toString();
+      }
 
-      if (error) throw error;
+      const todayStr = new Date().toISOString().split('T')[0];
 
-      fetchAllEvents(user.id);
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
+      const endpoint = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max&timezone=auto`;
+      const response = await fetch(endpoint);
+      const data = await response.json();
+
+      if (data && data.daily && data.daily.time) {
+        const todayIndex = data.daily.time.indexOf(todayStr);
+        if (todayIndex !== -1) {
+          setWeatherCode(data.daily.weather_code[todayIndex]);
+          setTemperature(data.daily.temperature_2m_max[todayIndex]);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching today weather:', error);
     }
   }
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.replace('/login' as any);
-  }
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadData();
+  };
 
-  const userEmail = user?.email || 'Loading user...';
+  const visibleEvents = showDeclined
+    ? events
+    : events.filter(ev => ev.status !== 'declined');
+
+  const backgroundImage =
+    weatherCode !== null
+      ? getWeatherBackgroundImage(weatherCode)
+      : { uri: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1000&auto=format&fit=crop' };
+
+  if (loading && !refreshing) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      {/* Top Header & User Profile Bar */}
-      <View style={styles.topBar}>
-        <View style={styles.userInfoContainer}>
-          <Text style={styles.welcomeText}>Welcome back,</Text>
-          {loadingUser ? (
-            <ActivityIndicator size="small" color="#007AFF" />
-          ) : (
-            <Text style={styles.emailText} numberOfLines={1}>{userEmail}</Text>
-          )}
+    <ImageBackground source={backgroundImage} style={styles.background} resizeMode="cover">
+      <View style={styles.overlay}>
+        {/* Header */}
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>Next 24 Hours</Text>
         </View>
-        
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
-          <Text style={styles.logoutButtonText}>Log Out</Text>
-        </TouchableOpacity>
-      </View>
 
-      {/* Navigation Buttons Row */}
-      <View style={styles.scheduleHeaderRow}>
-        <TouchableOpacity 
-          style={styles.historyButton} 
-          onPress={() => router.push('/past-events' as any)}
-        >
-          <Ionicons name="time-outline" size={16} color="#007AFF" />
-          <Text style={styles.historyButtonText}>Past Events</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.historyButton} 
-          onPress={() => router.push('/upcoming-events' as any)}
-        >
-          <Ionicons name="time-outline" size={16} color="#007AFF" />
-          <Text style={styles.historyButtonText}>Upcoming Events</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.createButton} 
-          onPress={() => router.push('/create-event' as any)}
-        >
-          <Text style={styles.createButtonText}>+ New Event</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Events List */}
-      {loadingEvents ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+        {/* Today's Weather Widget Banner */}
+        <View style={styles.weatherBanner}>
+          <View>
+            <Text style={styles.bannerSubtitle}>Today's Forecast</Text>
+            <Text style={styles.bannerTitle}>
+              {temperature !== null ? `${temperature}°C` : 'Loading temp...'}
+            </Text>
+          </View>
+          <Ionicons name="partly-sunny-outline" size={32} color="#FFF" />
         </View>
-      ) : events.length === 0 ? (
-        <View style={styles.centerContainer}>
-          <Text style={styles.emptyText}>No upcoming events or invitations.</Text>
-          <Text style={styles.emptySubText}>Tap "+ New Event" above to create one!</Text>
+
+        {/* Navigation Links to Past Events & Future Events */}
+        <View style={styles.navLinksRow}>
+          <TouchableOpacity
+            style={styles.navPill}
+            onPress={() => router.push('/past-events' as any)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="time-outline" size={16} color="#FFF" />
+            <Text style={styles.navPillText}>Past Events</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.navPill}
+            onPress={() => router.push('/future-events' as any)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="calendar-outline" size={16} color="#FFF" />
+            <Text style={styles.navPillText}>Future Events</Text>
+          </TouchableOpacity>
         </View>
-      ) : (
+
+        {/* Show Declined Switch Bar */}
+        <View style={styles.switchRow}>
+          <Text style={styles.switchLabel}>Show Declined Events</Text>
+          <Switch
+            value={showDeclined}
+            onValueChange={setShowDeclined}
+            trackColor={{ false: 'rgba(255,255,255,0.3)', true: '#007AFF' }}
+            thumbColor="#FFF"
+          />
+        </View>
+
+        {/* Events List */}
         <FlatList
-          data={events}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
+          data={visibleEvents}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFF" />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="calendar-outline" size={48} color="rgba(255,255,255,0.7)" />
+              <Text style={styles.emptyText}>
+                {showDeclined
+                  ? 'No events in the next 24 hours.'
+                  : 'No non-declined events in the next 24 hours.'}
+              </Text>
+            </View>
+          }
           renderItem={({ item }) => {
-            const isPending = !item.isOrganizer && item.status === 'pending';
+            const statusMeta = getStatusBadgeStyle(item.isOrganizer, item.status);
 
             return (
-              <View style={styles.eventCard}>
-                {/* Clickable Card Body linked to Event Details */}
-                <TouchableOpacity 
-                  activeOpacity={0.8}
-                  onPress={() => router.push(`/event/${item.id}` as any)}
-                >
-                  <View style={styles.cardHeaderRow}>
-                    <Text style={styles.eventTitle}>{item.title}</Text>
-                    
-                    {item.isOrganizer ? (
-                      <View style={[styles.badge, styles.badgeOrganizer]}>
-                        <Text style={styles.badgeOrganizerText}>Organizer</Text>
-                      </View>
-                    ) : item.status === 'accepted' ? (
-                      <View style={[styles.badge, styles.badgeAccepted]}>
-                        <Text style={styles.badgeAcceptedText}>Attending</Text>
-                      </View>
-                    ) : item.status === 'declined' ? (
-                      <View style={[styles.badge, styles.badgeDeclined]}>
-                        <Text style={styles.badgeDeclinedText}>Declined</Text>
-                      </View>
-                    ) : (
-                      <View style={[styles.badge, styles.badgePending]}>
-                        <Text style={styles.badgePendingText}>Pending Invite</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {item.description ? (
-                    <Text style={styles.eventDescription} numberOfLines={2}>
-                      {item.description}
-                    </Text>
-                  ) : null}
-
-                  <Text style={styles.eventTime}>
-                    🕒 {new Date(item.start_time).toLocaleString()}
+              <TouchableOpacity
+                style={styles.eventCard}
+                onPress={() => router.push(`/event/${item.id}` as any)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.cardHeader}>
+                  <Text style={styles.eventTitle} numberOfLines={1}>
+                    {item.title}
                   </Text>
-                </TouchableOpacity>
-
-                {/* Accept / Decline Action Buttons for Pending Invites (Separate from card click) */}
-                {isPending && (
-                  <View style={styles.inviteActionsRow}>
-                    <TouchableOpacity 
-                      style={[styles.actionButton, styles.acceptButton]}
-                      onPress={() => handleUpdateInvitationStatus(item.id, 'accepted')}
-                    >
-                      <Ionicons name="checkmark" size={16} color="#FFF" />
-                      <Text style={styles.actionButtonText}>Accept</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity 
-                      style={[styles.actionButton, styles.declineButton]}
-                      onPress={() => handleUpdateInvitationStatus(item.id, 'declined')}
-                    >
-                      <Ionicons name="close" size={16} color="#EF4444" />
-                      <Text style={styles.declineButtonText}>Decline</Text>
-                    </TouchableOpacity>
+                  <View style={[styles.statusBadge, statusMeta.badge]}>
+                    <Text style={[styles.statusBadgeText, statusMeta.text]}>
+                      {statusMeta.label}
+                    </Text>
                   </View>
-                )}
-              </View>
+                </View>
+
+                <Text style={styles.eventDescription} numberOfLines={2}>
+                  {item.description || 'No description provided.'}
+                </Text>
+
+                <View style={styles.cardFooter}>
+                  <View style={styles.timeRow}>
+                    <Ionicons name="time-outline" size={14} color="#007AFF" />
+                    <Text style={styles.timeText}>
+                      {new Date(item.start_time).toLocaleDateString()} at{' '}
+                      {new Date(item.start_time).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#888" />
+                </View>
+              </TouchableOpacity>
             );
           }}
         />
-      )}
-    </View>
+
+        {/* Floating Create Event Button at Bottom Right */}
+        <TouchableOpacity
+          style={styles.floatingCreateButton}
+          onPress={() => router.push('/create-event' as any)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="add" size={22} color="#FFF" />
+          <Text style={styles.floatingCreateText}>Create Event</Text>
+        </TouchableOpacity>
+      </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  background: { flex: 1, width: '100%', height: '100%' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.45)', paddingTop: 60 },
+  centerContainer: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#F8F9FA',
-    paddingTop: 60,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
-  },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#EFEFEF',
-  },
-  userInfoContainer: {
-    flex: 1,
-    marginRight: 12,
-  },
-  welcomeText: { fontSize: 12, color: '#666' },
-  emailText: { fontSize: 14, fontWeight: 'bold', color: '#111' },
-  logoutButton: {
-    backgroundColor: '#FEE2E2',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  logoutButtonText: { color: '#EF4444', fontSize: 13, fontWeight: '600' },
-  scheduleHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     marginBottom: 12,
   },
-  historyButton: {
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#FFF' },
+
+  weatherBanner: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#EBF3FF',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    gap: 6,
-  },
-  historyButtonText: { color: '#007AFF', fontWeight: '600', fontSize: 13 },
-  createButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-  },
-  createButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 50 },
-  emptyText: { fontSize: 16, fontWeight: '600', color: '#555' },
-  emptySubText: { fontSize: 13, color: '#888', marginTop: 4 },
-  listContainer: { paddingBottom: 20 },
-  eventCard: {
-    backgroundColor: '#FFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    marginHorizontal: 16,
+    marginBottom: 12,
     padding: 16,
     borderRadius: 12,
-    marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#EFEFEF',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 4,
+  bannerSubtitle: {
+    fontSize: 12,
+    color: '#E0E0E0',
+    textTransform: 'uppercase',
+    fontWeight: '600',
   },
-  eventTitle: { fontSize: 16, fontWeight: 'bold', color: '#222', flex: 1, marginRight: 8 },
-  eventDescription: { fontSize: 13, color: '#666', marginBottom: 8 },
-  eventTime: { fontSize: 12, color: '#007AFF', fontWeight: '500' },
-  
-  badge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6 },
-  badgeOrganizer: { backgroundColor: '#E0F2FE' },
-  badgeOrganizerText: { color: '#0369A1', fontSize: 11, fontWeight: '600' },
-  badgeAccepted: { backgroundColor: '#DCFCE7' },
-  badgeAcceptedText: { color: '#15803D', fontSize: 11, fontWeight: '600' },
-  badgeDeclined: { backgroundColor: '#FEE2E2' },
-  badgeDeclinedText: { color: '#B91C1C', fontSize: 11, fontWeight: '600' },
-  badgePending: { backgroundColor: '#FEF3C7' },
-  badgePendingText: { color: '#B45309', fontSize: 11, fontWeight: '600' },
+  bannerTitle: { fontSize: 24, fontWeight: 'bold', color: '#FFF', marginTop: 2 },
 
-  inviteActionsRow: {
+  navLinksRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-    paddingTop: 12,
+    marginHorizontal: 16,
+    marginBottom: 12,
   },
-  actionButton: {
+  navPill: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: 8,
-    gap: 4,
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  acceptButton: { backgroundColor: '#10B981' },
-  actionButtonText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
-  declineButton: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#FECACA' },
-  declineButtonText: { color: '#EF4444', fontSize: 13, fontWeight: '600' },
+  navPillText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  switchLabel: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  listContent: { paddingHorizontal: 16, paddingBottom: 100 },
+  eventCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+  },
+  eventTitle: { fontSize: 16, fontWeight: 'bold', color: '#111', flex: 1 },
+
+  statusBadge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6 },
+  statusBadgeText: { fontSize: 11, fontWeight: '700' },
+  badgeOrganizer: { backgroundColor: '#E0F2FE' },
+  badgeOrganizerText: { color: '#0369A1' },
+  badgeAccepted: { backgroundColor: '#DCFCE7' },
+  badgeAcceptedText: { color: '#15803D' },
+  badgeDeclined: { backgroundColor: '#FEE2E2' },
+  badgeDeclinedText: { color: '#B91C1C' },
+  badgePending: { backgroundColor: '#FEF3C7' },
+  badgePendingText: { color: '#B45309' },
+
+  eventDescription: { fontSize: 13, color: '#555', marginBottom: 12, lineHeight: 18 },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+    paddingTop: 10,
+  },
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  timeText: { fontSize: 12, color: '#007AFF', fontWeight: '600' },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 60, gap: 12 },
+  emptyText: { fontSize: 15, color: '#FFF', fontWeight: '500', textAlign: 'center' },
+
+  floatingCreateButton: {
+    position: 'absolute',
+    right: 18,
+    bottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0, 122, 255, 0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+  },
+  floatingCreateText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
 });

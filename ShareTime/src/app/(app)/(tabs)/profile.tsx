@@ -1,5 +1,5 @@
 // app/(app)/(tabs)/profile.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -12,8 +12,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { pickAndUploadAvatar } from '@/lib/uploadAvatar';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,43 +27,87 @@ type Profile = {
   avatar_url?: string | null;
 };
 
+type CreatedEvent = {
+  id: string;
+  title: string;
+  start_time: string;
+  end_time?: string | null;
+  venues?: {
+    name: string;
+  } | null;
+};
+
 export default function MyProfileScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [createdEvents, setCreatedEvents] = useState<CreatedEvent[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [bio, setBio] = useState('');
 
-  useEffect(() => {
-    fetchMyProfile();
-  }, []);
-
-  async function fetchMyProfile() {
+  const fetchMyProfileAndEvents = useCallback(async (isRefresh = false) => {
     try {
-      setLoading(true);
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
+      const [profileRes, eventsRes] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single(),
+        supabase
+          .from('events')
+          .select(`
+            id,
+            title,
+            start_time,
+            end_time,
+            venues:venue_id (name)
+          `)
+          .eq('created_by', user.id)
+          .order('start_time', { ascending: false }),
+      ]);
 
-      if (error) throw error;
+      if (profileRes.error) throw profileRes.error;
+      if (eventsRes.error) throw eventsRes.error;
 
-      setProfile(data);
-      setFullName(data.full_name || '');
-      setBio(data.bio || '');
+      setProfile(profileRes.data);
+      setFullName(profileRes.data.full_name || '');
+      setBio(profileRes.data.bio || '');
+
+      const normalizedEvents: CreatedEvent[] = (eventsRes.data || []).map((ev: any) => ({
+        id: ev.id,
+        title: ev.title,
+        start_time: ev.start_time,
+        end_time: ev.end_time,
+        venues: Array.isArray(ev.venues) ? (ev.venues[0] ?? null) : (ev.venues ?? null),
+      }));
+
+      setCreatedEvents(normalizedEvents);
     } catch (error: any) {
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchMyProfileAndEvents(false);
+    }, [fetchMyProfileAndEvents])
+  );
 
   async function handleChangeAvatar() {
     if (!profile || uploadingAvatar) return;
@@ -103,6 +148,12 @@ export default function MyProfileScreen() {
     }
   }
 
+  function handleCancelEdit() {
+    setFullName(profile?.full_name || '');
+    setBio(profile?.bio || '');
+    setIsEditing(false);
+  }
+
   async function handleSignOut() {
     try {
       const { error } = await supabase.auth.signOut();
@@ -113,7 +164,30 @@ export default function MyProfileScreen() {
     }
   }
 
-  if (loading) {
+  function formatEventDate(startIso: string, endIso?: string | null) {
+    const start = new Date(startIso);
+    const datePart = start.toLocaleDateString([], {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    const startTimePart = start.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    if (!endIso) {
+      return `${datePart} · ${startTimePart}`;
+    }
+
+    const endTimePart = new Date(endIso).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return `${datePart} · ${startTimePart} – ${endTimePart}`;
+  }
+
+  if (loading && !refreshing) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -126,9 +200,18 @@ export default function MyProfileScreen() {
       style={{ flex: 1, backgroundColor: '#F8F9FA' }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => fetchMyProfileAndEvents(true)}
+          />
+        }
+      >
         <Text style={styles.headerTitle}>My Profile</Text>
 
+        {/* Profile Details Card */}
         <View style={styles.card}>
           <View style={styles.avatarContainer}>
             <TouchableOpacity
@@ -197,7 +280,7 @@ export default function MyProfileScreen() {
           <View style={styles.actionSection}>
             {isEditing ? (
               <View style={styles.editRow}>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setIsEditing(false)}>
+                <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.saveButton} onPress={handleSaveProfile}>
@@ -216,6 +299,43 @@ export default function MyProfileScreen() {
               <Text style={styles.signOutButtonText}>Sign Out</Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Events Created by User */}
+        <View style={styles.eventsSection}>
+          <Text style={styles.sectionTitle}>My Created Events ({createdEvents.length})</Text>
+
+          {createdEvents.length === 0 ? (
+            <View style={styles.emptyEventsCard}>
+              <Ionicons name="calendar-outline" size={26} color="#8E8E93" />
+              <Text style={styles.emptyEventsText}>You haven't created any events yet.</Text>
+            </View>
+          ) : (
+            createdEvents.map(ev => (
+              <TouchableOpacity
+                key={ev.id}
+                style={styles.eventLinkCard}
+                activeOpacity={0.75}
+                onPress={() => router.push(`/event/${ev.id}` as any)}
+              >
+                <View style={styles.eventInfo}>
+                  <Text style={styles.eventTitle} numberOfLines={1}>
+                    {ev.title}
+                  </Text>
+                  <Text style={styles.eventDate}>
+                    {formatEventDate(ev.start_time, ev.end_time)}
+                  </Text>
+                  {ev.venues?.name ? (
+                    <Text style={styles.eventVenue} numberOfLines={1}>
+                      📍 {ev.venues.name}
+                    </Text>
+                  ) : null}
+                </View>
+
+                <Ionicons name="chevron-forward" size={18} color="#007AFF" />
+              </TouchableOpacity>
+            ))
+          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -271,4 +391,34 @@ const styles = StyleSheet.create({
 
   signOutButton: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: '#FEF2F2', padding: 12, borderRadius: 8, gap: 6 },
   signOutButtonText: { color: '#EF4444', fontWeight: '600', fontSize: 15 },
+
+  // Created Events List
+  eventsSection: { marginTop: 24 },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#111', marginBottom: 12 },
+  emptyEventsCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 22,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    gap: 8,
+  },
+  emptyEventsText: { fontSize: 14, color: '#6B7280' },
+  eventLinkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFF',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    gap: 10,
+  },
+  eventInfo: { flex: 1 },
+  eventTitle: { fontSize: 15, fontWeight: '700', color: '#111' },
+  eventDate: { fontSize: 13, color: '#007AFF', fontWeight: '500', marginTop: 4 },
+  eventVenue: { fontSize: 12, color: '#4B5563', marginTop: 4 },
 });

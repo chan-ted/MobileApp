@@ -17,6 +17,8 @@ import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 
+type RsvpStatus = 'accepted' | 'pending' | 'declined';
+
 type Profile = {
   id: string;
   email: string;
@@ -28,12 +30,13 @@ type Venue = {
   id: string;
   name: string;
   description?: string | null;
+  image_url?: string | null;
 };
 
 type Participant = {
   id: string;
   user_id: string;
-  status: 'accepted' | 'pending' | 'declined';
+  status: RsvpStatus;
   profiles: Profile;
 };
 
@@ -101,6 +104,10 @@ export default function EventDetailScreen() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+
+  // Current User RSVP Status
+  const [myStatus, setMyStatus] = useState<RsvpStatus>('pending');
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   // Event Details States
   const [title, setTitle] = useState('');
@@ -170,12 +177,12 @@ export default function EventDetailScreen() {
           setIsOrganizer(true);
         }
 
-        // 2. Fetch Linked Venue if present
+        // 2. Fetch Linked Venue (including image_url) if present
         let loadedVenue: Venue | null = null;
         if (eventData.venue_id) {
           const { data: venueData } = await supabase
             .from('venues')
-            .select('id, name, description')
+            .select('id, name, description, image_url')
             .eq('id', eventData.venue_id)
             .single();
 
@@ -200,7 +207,7 @@ export default function EventDetailScreen() {
         await markAsRead(id, user.id);
 
         // 5. Fetch Participants & Messages
-        await fetchParticipants();
+        await fetchParticipants(user.id);
         await fetchMessages();
       } catch (error: any) {
         Alert.alert('Error', error.message);
@@ -272,6 +279,42 @@ export default function EventDetailScreen() {
     }
   }
 
+  // --- Change Current User RSVP Status (accepted / pending / declined) ---
+  async function handleChangeMyStatus(nextStatus: RsvpStatus) {
+    if (!currentUserId || !id || updatingStatus || myStatus === nextStatus) return;
+
+    setUpdatingStatus(true);
+    try {
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('event_participants')
+        .update({ status: nextStatus })
+        .eq('event_id', id)
+        .eq('user_id', currentUserId)
+        .select('id');
+
+      if (updateError) throw updateError;
+
+      if (!updatedRows || updatedRows.length === 0) {
+        const { error: insertError } = await supabase
+          .from('event_participants')
+          .insert({
+            event_id: id,
+            user_id: currentUserId,
+            status: nextStatus,
+          });
+
+        if (insertError) throw insertError;
+      }
+
+      setMyStatus(nextStatus);
+      await fetchParticipants(currentUserId);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Could not update your status.');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  }
+
   // --- Venue Search & Selection While Editing ---
   async function handleEditVenueSearch(text: string) {
     setEditVenueQuery(text);
@@ -286,7 +329,7 @@ export default function EventDetailScreen() {
     try {
       const { data, error } = await supabase
         .from('venues')
-        .select('id, name, description')
+        .select('id, name, description, image_url')
         .ilike('name', `%${text.trim()}%`)
         .order('name', { ascending: true })
         .limit(6);
@@ -372,7 +415,7 @@ export default function EventDetailScreen() {
   };
 
   // --- Data Fetching Helpers ---
-  async function fetchParticipants() {
+  async function fetchParticipants(activeUserId?: string | null) {
     try {
       const { data: participantRows, error: partError } = await supabase
         .from('event_participants')
@@ -407,7 +450,16 @@ export default function EventDetailScreen() {
         }
       });
 
-      setParticipants(Array.from(uniqueParticipantsMap.values()));
+      const list = Array.from(uniqueParticipantsMap.values());
+      setParticipants(list);
+
+      const lookupUserId = activeUserId ?? currentUserId;
+      if (lookupUserId) {
+        const mine = list.find(item => item.user_id === lookupUserId);
+        if (mine) {
+          setMyStatus(mine.status);
+        }
+      }
     } catch (error: any) {
       console.error('Error fetching participants:', error.message);
     }
@@ -529,7 +581,7 @@ export default function EventDetailScreen() {
             name: trimmedVenueText,
             creator_id: currentUserId,
           })
-          .select('id, name, description')
+          .select('id, name, description, image_url')
           .single();
 
         if (venueCreateError) throw venueCreateError;
@@ -680,11 +732,50 @@ export default function EventDetailScreen() {
                   )}
                 </View>
 
+                {/* Your RSVP Status Selector (Accepted / Pending / Declined) */}
+                <Text style={styles.label}>Your RSVP Status</Text>
+                <View style={styles.rsvpRow}>
+                  {(['accepted', 'pending', 'declined'] as RsvpStatus[]).map(statusOption => {
+                    const active = myStatus === statusOption;
+                    const label =
+                      statusOption === 'accepted'
+                        ? 'Accepted'
+                        : statusOption === 'pending'
+                        ? 'Pending'
+                        : 'Declined';
+
+                    return (
+                      <TouchableOpacity
+                        key={statusOption}
+                        style={[
+                          styles.rsvpOption,
+                          active && styles.rsvpOptionActive,
+                          active && statusOption === 'accepted' && styles.rsvpAcceptedActive,
+                          active && statusOption === 'pending' && styles.rsvpPendingActive,
+                          active && statusOption === 'declined' && styles.rsvpDeclinedActive,
+                        ]}
+                        onPress={() => handleChangeMyStatus(statusOption)}
+                        disabled={updatingStatus}
+                        activeOpacity={0.8}
+                      >
+                        <Text
+                          style={[
+                            styles.rsvpOptionText,
+                            active && styles.rsvpOptionTextActive,
+                          ]}
+                        >
+                          {label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
                 {/* Organizer Info */}
                 <Text style={styles.label}>Organizer</Text>
                 <Text style={styles.valueText}>👤 {creatorName}</Text>
 
-                {/* Venue Info & Link */}
+                {/* Venue Info & Chip with Picture */}
                 <Text style={styles.label}>Venue</Text>
                 {isEditing ? (
                   <View>
@@ -713,7 +804,14 @@ export default function EventDetailScreen() {
                             style={styles.resultItem}
                             onPress={() => handleSelectEditVenue(v)}
                           >
-                            <Text style={styles.resultEmail}>{v.name}</Text>
+                            <View style={styles.searchResultLeft}>
+                              {v.image_url ? (
+                                <Image source={{ uri: v.image_url }} style={styles.venueSearchThumb} />
+                              ) : (
+                                <Ionicons name="location-outline" size={18} color="#007AFF" />
+                              )}
+                              <Text style={styles.resultEmail}>{v.name}</Text>
+                            </View>
                             <Ionicons name="checkmark-circle-outline" size={18} color="#007AFF" />
                           </TouchableOpacity>
                         ))}
@@ -730,12 +828,20 @@ export default function EventDetailScreen() {
                   </View>
                 ) : venue ? (
                   <TouchableOpacity
-                    style={styles.venueLinkRow}
-                    activeOpacity={0.7}
+                    style={styles.venueChip}
+                    activeOpacity={0.75}
                     onPress={() => router.push(`/venue/${venue.id}` as any)}
                   >
-                    <Ionicons name="location" size={16} color="#007AFF" />
-                    <Text style={styles.venueLinkText}>{venue.name}</Text>
+                    {venue.image_url ? (
+                      <Image source={{ uri: venue.image_url }} style={styles.venueChipImage} />
+                    ) : (
+                      <View style={styles.venueChipFallbackIcon}>
+                        <Ionicons name="location" size={16} color="#007AFF" />
+                      </View>
+                    )}
+                    <Text style={styles.venueLinkText} numberOfLines={1}>
+                      {venue.name}
+                    </Text>
                     <Ionicons name="chevron-forward" size={16} color="#007AFF" />
                   </TouchableOpacity>
                 ) : (
@@ -1016,18 +1122,62 @@ const styles = StyleSheet.create({
   badgeText: { color: '#0369A1', fontSize: 11, fontWeight: '600' },
   label: { fontSize: 12, fontWeight: '600', color: '#666', marginTop: 10 },
   valueText: { fontSize: 15, color: '#111', fontWeight: '500', marginTop: 2 },
-  venueLinkRow: {
+
+  // RSVP Status Selector
+  rsvpRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  rsvpOption: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  rsvpOptionActive: { borderWidth: 1 },
+  rsvpAcceptedActive: { backgroundColor: '#DCFCE7', borderColor: '#16A34A' },
+  rsvpPendingActive: { backgroundColor: '#FEF3C7', borderColor: '#D97706' },
+  rsvpDeclinedActive: { backgroundColor: '#FEE2E2', borderColor: '#DC2626' },
+  rsvpOptionText: { fontSize: 13, fontWeight: '600', color: '#4B5563' },
+  rsvpOptionTextActive: { color: '#111827', fontWeight: '700' },
+
+  // Venue Chip with Picture
+  venueChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    gap: 8,
+    marginTop: 6,
+    paddingVertical: 6,
+    paddingLeft: 6,
+    paddingRight: 12,
     backgroundColor: '#EBF3FF',
-    borderRadius: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
     alignSelf: 'flex-start',
+    maxWidth: '100%',
   },
-  venueLinkText: { fontSize: 15, color: '#007AFF', fontWeight: '600' },
+  venueChipImage: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#DBEAFE',
+  },
+  venueChipFallbackIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#DBEAFE',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  venueSearchThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: '#E5E7EB',
+  },
+  venueLinkText: { fontSize: 14, color: '#007AFF', fontWeight: '600', flexShrink: 1 },
   unassignedVenueRow: {
     flexDirection: 'row',
     alignItems: 'center',
