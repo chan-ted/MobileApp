@@ -11,16 +11,19 @@ import {
   RefreshControl,
   Linking,
   Platform,
+  Image,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
+import { pickAndUploadVenueImage } from '@/lib/uploadVenueImage';
 
 type Venue = {
   id: string;
   creator_id: string;
   name: string;
   description: string | null;
+  image_url: string | null;
   created_at: string;
 };
 
@@ -43,6 +46,7 @@ export default function VenueDetailScreen() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   // Search state
   const [showSearch, setShowSearch] = useState(false);
@@ -73,7 +77,7 @@ export default function VenueDetailScreen() {
 
       const { data: venueData, error: venueError } = await supabase
         .from('venues')
-        .select('id, creator_id, name, description, created_at')
+        .select('id, creator_id, name, description, image_url, created_at')
         .eq('id', id)
         .single();
 
@@ -101,6 +105,23 @@ export default function VenueDetailScreen() {
   useEffect(() => {
     fetchVenueAndEvents(false);
   }, [fetchVenueAndEvents]);
+
+  async function handleChangeVenueImage() {
+    if (!venue || !isCreator || uploadingImage) return;
+
+    setUploadingImage(true);
+    try {
+      const newImageUrl = await pickAndUploadVenueImage(venue.id);
+      if (newImageUrl) {
+        setVenue(prev => (prev ? { ...prev, image_url: newImageUrl } : prev));
+        Alert.alert('Success', 'Venue picture updated.');
+      }
+    } catch (error: any) {
+      Alert.alert('Upload Failed', error.message ?? 'Could not upload venue picture.');
+    } finally {
+      setUploadingImage(false);
+    }
+  }
 
   async function handleOpenVenueInMap() {
     if (!venue?.name.trim()) return;
@@ -147,7 +168,7 @@ export default function VenueDetailScreen() {
         })
         .eq('id', venue.id)
         .eq('creator_id', venue.creator_id)
-        .select('id, creator_id, name, description, created_at')
+        .select('id, creator_id, name, description, image_url, created_at')
         .single();
 
       if (error) throw error;
@@ -238,6 +259,46 @@ export default function VenueDetailScreen() {
 
       {/* Venue Card */}
       <View style={styles.card}>
+        {/* Venue Cover Photo */}
+        {venue.image_url ? (
+          <View style={styles.coverWrapper}>
+            <Image source={{ uri: venue.image_url }} style={styles.coverImage} />
+            {isCreator && (
+              <TouchableOpacity
+                style={styles.photoOverlayBtn}
+                onPress={handleChangeVenueImage}
+                disabled={uploadingImage}
+              >
+                {uploadingImage ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name="camera" size={16} color="#FFF" />
+                    <Text style={styles.photoOverlayText}>Change Photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          isCreator && (
+            <TouchableOpacity
+              style={styles.addPhotoBox}
+              onPress={handleChangeVenueImage}
+              disabled={uploadingImage}
+            >
+              {uploadingImage ? (
+                <ActivityIndicator size="small" color="#007AFF" />
+              ) : (
+                <>
+                  <Ionicons name="image-outline" size={24} color="#007AFF" />
+                  <Text style={styles.addPhotoText}>Add Venue Picture</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )
+        )}
+
         <View style={styles.headerRow}>
           <TouchableOpacity
             style={styles.iconBadge}
@@ -436,6 +497,51 @@ const styles = StyleSheet.create({
     padding: 18,
     borderWidth: 1,
     borderColor: '#EFEFEF',
+  },
+  coverWrapper: {
+    position: 'relative',
+    marginBottom: 14,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  coverImage: {
+    width: '100%',
+    height: 180,
+    backgroundColor: '#E5E7EB',
+  },
+  photoOverlayBtn: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(17, 24, 39, 0.75)',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  photoOverlayText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  addPhotoBox: {
+    height: 110,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#93C5FD',
+    backgroundColor: '#F0F7FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 14,
+  },
+  addPhotoText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   headerRow: {
     flexDirection: 'row',

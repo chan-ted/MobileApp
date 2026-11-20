@@ -131,8 +131,8 @@ export default function UpcomingEventsScreen() {
 
   async function fetchTomorrowWeather() {
     try {
-      let lat = '40.7128';
-      let lon = '-74.0060';
+      let lat = '56.4620';
+      let lon = '2.9707';
 
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
