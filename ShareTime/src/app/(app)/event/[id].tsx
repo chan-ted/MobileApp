@@ -9,7 +9,8 @@ import {
   Alert, 
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform 
+  Platform,
+  Image,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -19,7 +20,8 @@ import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/d
 type Profile = {
   id: string;
   email: string;
-  full_name?: string;
+  full_name?: string | null;
+  avatar_url?: string | null;
 };
 
 type Venue = {
@@ -42,9 +44,53 @@ type Message = {
   sender_id: string;
   profiles: {
     email: string;
-    full_name?: string;
+    full_name?: string | null;
+    avatar_url?: string | null;
   };
 };
+
+function SmallAvatar({
+  uri,
+  name,
+  size = 20,
+}: {
+  uri?: string | null;
+  name?: string | null;
+  size?: number;
+}) {
+  const initial = (name?.trim()?.[0] || '?').toUpperCase();
+
+  if (uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: '#E5E7EB',
+        }}
+      />
+    );
+  }
+
+  return (
+    <View
+      style={[
+        styles.smallAvatarFallback,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+        },
+      ]}
+    >
+      <Text style={[styles.smallAvatarInitial, { fontSize: Math.max(9, size * 0.48) }]}>
+        {initial}
+      </Text>
+    </View>
+  );
+}
 
 export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -144,7 +190,7 @@ export default function EventDetailScreen() {
         // 3. Fetch Creator Profile via 2-step query
         const { data: creatorProfile } = await supabase
           .from('profiles')
-          .select('email, full_name')
+          .select('email, full_name, avatar_url')
           .eq('id', eventData.created_by)
           .single();
 
@@ -174,7 +220,7 @@ export default function EventDetailScreen() {
         async (payload) => {
           const { data: profileData } = await supabase
             .from('profiles')
-            .select('email, full_name')
+            .select('email, full_name, avatar_url')
             .eq('id', payload.new.sender_id)
             .single();
 
@@ -183,7 +229,7 @@ export default function EventDetailScreen() {
             content: payload.new.content,
             created_at: payload.new.created_at,
             sender_id: payload.new.sender_id,
-            profiles: profileData || { email: 'Unknown' },
+            profiles: profileData || { email: 'Unknown', avatar_url: null },
           };
 
           setMessages((prev) => {
@@ -204,7 +250,7 @@ export default function EventDetailScreen() {
     try {
       const nowIso = new Date().toISOString();
       
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('event_participants')
         .update({ last_read_at: nowIso })
         .eq('event_id', eventId)
@@ -342,7 +388,7 @@ export default function EventDetailScreen() {
       const userIds = participantRows.map(p => p.user_id);
       const { data: profileRows, error: profError } = await supabase
         .from('profiles')
-        .select('id, email, full_name')
+        .select('id, email, full_name, avatar_url')
         .in('id', userIds);
 
       if (profError) throw profError;
@@ -356,7 +402,7 @@ export default function EventDetailScreen() {
             id: p.id,
             user_id: p.user_id,
             status: p.status,
-            profiles: profileMap.get(p.user_id) || { id: p.user_id, email: 'Unknown' },
+            profiles: profileMap.get(p.user_id) || { id: p.user_id, email: 'Unknown', avatar_url: null },
           });
         }
       });
@@ -376,7 +422,7 @@ export default function EventDetailScreen() {
           content,
           created_at,
           sender_id,
-          profiles:sender_id (email, full_name)
+          profiles:sender_id (email, full_name, avatar_url)
         `)
         .eq('event_id', id)
         .order('created_at', { ascending: true });
@@ -389,8 +435,8 @@ export default function EventDetailScreen() {
         created_at: item.created_at,
         sender_id: item.sender_id,
         profiles: Array.isArray(item.profiles)
-          ? (item.profiles[0] || { email: 'Unknown' })
-          : (item.profiles || { email: 'Unknown' }),
+          ? (item.profiles[0] || { email: 'Unknown', avatar_url: null })
+          : (item.profiles || { email: 'Unknown', avatar_url: null }),
       }));
 
       setMessages(formattedMessages);
@@ -414,7 +460,7 @@ export default function EventDetailScreen() {
 
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, full_name')
+        .select('id, email, full_name, avatar_url')
         .ilike('email', `%${text.trim()}%`)
         .not('id', 'in', `(${existingUserIds.join(',')})`)
         .limit(5);
@@ -554,7 +600,7 @@ export default function EventDetailScreen() {
           content,
           created_at,
           sender_id,
-          profiles:sender_id (email, full_name)
+          profiles:sender_id (email, full_name, avatar_url)
         `)
         .single();
 
@@ -567,8 +613,8 @@ export default function EventDetailScreen() {
           created_at: (data as any).created_at,
           sender_id: (data as any).sender_id,
           profiles: Array.isArray((data as any).profiles)
-            ? ((data as any).profiles[0] || { email: 'Unknown' })
-            : ((data as any).profiles || { email: 'Unknown' }),
+            ? ((data as any).profiles[0] || { email: 'Unknown', avatar_url: null })
+            : ((data as any).profiles || { email: 'Unknown', avatar_url: null }),
         };
 
         setMessages((prev) => {
@@ -814,6 +860,7 @@ export default function EventDetailScreen() {
                 <View style={styles.chipsContainer}>
                   {participants.map(p => {
                     const isCreator = p.user_id === creatorId;
+                    const displayLabel = p.profiles?.full_name || p.profiles?.email;
                     return (
                       <View key={p.id} style={[styles.chip, isCreator && styles.organizerChip]}>
                         <TouchableOpacity
@@ -821,8 +868,14 @@ export default function EventDetailScreen() {
                           activeOpacity={0.7}
                           onPress={() => router.push(`/profile/${p.user_id}` as any)}
                         >
+                          <SmallAvatar
+                            uri={p.profiles?.avatar_url}
+                            name={displayLabel}
+                            size={20}
+                          />
+
                           <Text style={styles.chipText} numberOfLines={1}>
-                            {p.profiles?.full_name || p.profiles?.email}
+                            {displayLabel}
                           </Text>
 
                           {isCreator && (
@@ -873,7 +926,14 @@ export default function EventDetailScreen() {
                             style={styles.resultItem}
                             onPress={() => addParticipant(item)}
                           >
-                            <Text style={styles.resultEmail}>{item.email}</Text>
+                            <View style={styles.searchResultLeft}>
+                              <SmallAvatar
+                                uri={item.avatar_url}
+                                name={item.full_name || item.email}
+                                size={22}
+                              />
+                              <Text style={styles.resultEmail}>{item.email}</Text>
+                            </View>
                             <Ionicons name="add-circle-outline" size={20} color="#007AFF" />
                           </TouchableOpacity>
                         ))}
@@ -900,12 +960,18 @@ export default function EventDetailScreen() {
           }
           renderItem={({ item }) => {
             const isMe = item.sender_id === currentUserId;
+            const senderLabel = item.profiles?.full_name || item.profiles?.email;
             return (
               <View style={[styles.bubbleWrapper, isMe ? styles.myMessage : styles.theirMessage]}>
                 {!isMe && (
-                  <Text style={styles.senderName}>
-                    {item.profiles?.full_name || item.profiles?.email}
-                  </Text>
+                  <View style={styles.senderRow}>
+                    <SmallAvatar
+                      uri={item.profiles?.avatar_url}
+                      name={senderLabel}
+                      size={18}
+                    />
+                    <Text style={styles.senderName}>{senderLabel}</Text>
+                  </View>
                 )}
                 <Text style={[styles.messageText, isMe ? styles.myText : styles.theirText]}>
                   {item.content}
@@ -995,15 +1061,26 @@ const styles = StyleSheet.create({
   cancelButtonText: { color: '#495057', fontWeight: '600' },
   saveButton: { flex: 1, backgroundColor: '#007AFF', padding: 12, borderRadius: 8, alignItems: 'center' },
   saveButtonText: { color: '#FFF', fontWeight: '600' },
+
+  // Small Avatars
+  smallAvatarFallback: {
+    backgroundColor: '#DBEAFE',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  smallAvatarInitial: {
+    color: '#1D4ED8',
+    fontWeight: '700',
+  },
   
   // Chips & Participants
   chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  chip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 16, gap: 6 },
+  chip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingVertical: 5, paddingHorizontal: 8, borderRadius: 16, gap: 6 },
   chipLinkArea: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   organizerChip: { backgroundColor: '#EBF3FF', borderWidth: 1, borderColor: '#CCE0FF' },
   organizerBadge: { backgroundColor: '#007AFF', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 4 },
   organizerBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  chipText: { fontSize: 13, color: '#333', fontWeight: '500', maxWidth: 140 },
+  chipText: { fontSize: 13, color: '#333', fontWeight: '500', maxWidth: 130 },
   chipRemove: { marginLeft: 2 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   dotAccepted: { backgroundColor: '#10B981' },
@@ -1016,13 +1093,15 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, paddingVertical: 8, fontSize: 13, color: '#111' },
   resultsContainer: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EFEFEF', borderRadius: 8, marginTop: 4 },
   resultItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  searchResultLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   resultEmail: { fontSize: 13, color: '#111' },
 
   // Chat Bubbles
   bubbleWrapper: { maxWidth: '80%', padding: 12, borderRadius: 12, marginBottom: 10 },
   myMessage: { alignSelf: 'flex-end', backgroundColor: '#007AFF' },
   theirMessage: { alignSelf: 'flex-start', backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EFEFEF' },
-  senderName: { fontSize: 11, color: '#666', marginBottom: 2, fontWeight: '600' },
+  senderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  senderName: { fontSize: 11, color: '#666', fontWeight: '600' },
   messageText: { fontSize: 14 },
   myText: { color: '#FFF' },
   theirText: { color: '#111' },
