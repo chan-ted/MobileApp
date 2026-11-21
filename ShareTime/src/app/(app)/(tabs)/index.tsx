@@ -195,34 +195,72 @@ export default function EventsHomeScreen() {
   }
 
   async function fetchTodayWeather() {
-    try {
-      let lat = '56.4620';
-      let lon = '-2.9707';
+  try {
+    let lat = '56.4620';
+    let lon = '-2.9707';
 
+    try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
-        const currentLocation = await Location.getCurrentPositionAsync({});
-        lat = currentLocation.coords.latitude.toString();
-        lon = currentLocation.coords.longitude.toString();
+        const currentLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        lat = currentLocation.coords.latitude.toFixed(4);
+        lon = currentLocation.coords.longitude.toFixed(4);
       }
-
-      const todayStr = new Date().toISOString().split('T')[0];
-
-      const endpoint = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max&timezone=auto`;
-      const response = await fetch(endpoint);
-      const data = await response.json();
-
-      if (data && data.daily && data.daily.time) {
-        const todayIndex = data.daily.time.indexOf(todayStr);
-        if (todayIndex !== -1) {
-          setWeatherCode(data.daily.weather_code[todayIndex]);
-          setTemperature(data.daily.temperature_2m_max[todayIndex]);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching today weather:', error);
+    } catch {
+      // Keep Dundee fallback coordinates if location lookup fails/times out
     }
+
+    const endpoint =
+      `https://api.open-meteo.com/v1/forecast` +
+      `?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,weather_code` +
+      `&models=ukmo_seamless` +
+      `&timezone=auto`;
+
+    const response = await fetch(endpoint);
+    const data = await response.json();
+
+    if (data?.current) {
+      setWeatherCode(data.current.weather_code);
+      setTemperature(Math.round(data.current.temperature_2m));
+    }
+  } catch (error) {
+    console.error('Error fetching today weather:', error);
   }
+}
+
+  function getWeatherDetails(weatherCode: number | null | undefined) {
+  const code = Number(weatherCode);
+
+  if (Number.isNaN(code)) {
+    return { label: 'Weather', icon: 'partly-sunny-outline' as const };
+  }
+  if (code === 0) {
+    return { label: 'Clear Sky', icon: 'sunny-outline' as const };
+  }
+  if (code === 1 || code === 2 || code === 3) {
+    return {
+      label: code === 3 ? 'Overcast' : 'Partly Cloudy',
+      icon: code === 3 ? ('cloud-outline' as const) : ('partly-sunny-outline' as const),
+    };
+  }
+  if (code === 45 || code === 48) {
+    return { label: 'Fog', icon: 'cloudy-outline' as const };
+  }
+  if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) {
+    return { label: 'Rain', icon: 'rainy-outline' as const };
+  }
+  if ([71, 73, 75, 85, 86].includes(code)) {
+    return { label: 'Snow', icon: 'snow-outline' as const };
+  }
+  if ([95, 96, 99].includes(code)) {
+    return { label: 'Thunderstorm', icon: 'thunderstorm-outline' as const };
+  }
+
+  return { label: 'Clear', icon: 'sunny-outline' as const };
+}
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -237,6 +275,10 @@ export default function EventsHomeScreen() {
     weatherCode !== null
       ? getWeatherBackgroundImage(weatherCode)
       : { uri: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1000&auto=format&fit=crop' };
+
+
+const weatherDetails = getWeatherDetails(weatherCode);
+
 
   if (loading && !refreshing) {
     return (
@@ -254,16 +296,18 @@ export default function EventsHomeScreen() {
           <Text style={styles.headerTitle}>Next 24 Hours</Text>
         </View>
 
-        {/* Today's Weather Widget Banner */}
-        <View style={styles.weatherBanner}>
-          <View>
-            <Text style={styles.bannerSubtitle}>Today's Forecast</Text>
-            <Text style={styles.bannerTitle}>
-              {temperature !== null ? `${temperature}°C` : 'Loading temp...'}
-            </Text>
-          </View>
-          <Ionicons name="partly-sunny-outline" size={32} color="#FFF" />
-        </View>
+{/* Today's Weather Widget Banner */}
+<View style={styles.weatherBanner}>
+  <View>
+    <Text style={styles.bannerSubtitle}>
+      Today's Weather · {weatherDetails.label}
+    </Text>
+    <Text style={styles.bannerTitle}>
+      {temperature !== null ? `${temperature}°C` : 'Loading temp...'}
+    </Text>
+  </View>
+  <Ionicons name={weatherDetails.icon} size={32} color="#FFF" />
+</View>
 
         {/* Navigation Links to Past Events & Future Events */}
         <View style={styles.navLinksRow}>
@@ -402,7 +446,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   bannerSubtitle: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#E0E0E0',
     textTransform: 'uppercase',
     fontWeight: '600',

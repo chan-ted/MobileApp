@@ -1,31 +1,25 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// Configure how notifications behave when the app is open in the foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
-
 export async function requestNotificationPermissions(): Promise<boolean> {
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('event-reminders', {
-      name: 'Event Reminders',
-      importance: Notifications.AndroidImportance.HIGH,
-      sound: 'default',
-    });
+  try {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('event-reminders', {
+        name: 'Event Reminders',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+      });
+    }
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    if (existingStatus === 'granted') return true;
+
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === 'granted';
+  } catch (error) {
+    console.warn('Notification channel/permission skipped:', error);
+    return false;
   }
-
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  if (existingStatus === 'granted') return true;
-
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === 'granted';
 }
 
 export async function scheduleOneHourEventReminder(params: {

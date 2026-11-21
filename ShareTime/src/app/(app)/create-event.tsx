@@ -1,98 +1,92 @@
-import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  ScrollView, 
-  Alert, 
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
   ActivityIndicator,
+  Platform,
   KeyboardAvoidingView,
-  Platform
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '@/lib/supabase';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { supabase } from '@/lib/supabase';
+import { scheduleOneHourEventReminder } from '@/lib/notifications';
 
-type Profile = {
-  id: string;
-  email: string;
-  full_name?: string;
-};
-
-type Venue = {
+type VenueOption = {
   id: string;
   name: string;
-  creator_id?: string;
+  description?: string | null;
+  image_url?: string | null;
+};
+
+type ProfileOption = {
+  id: string;
+  email: string;
+  full_name?: string | null;
+  avatar_url?: string | null;
 };
 
 export default function CreateEventScreen() {
   const router = useRouter();
-  
-  // Core Event Form States
+
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [startDate, setStartDate] = useState(new Date());
-  const [endDate, setEndDate] = useState(new Date(Date.now() + 60 * 60 * 1000));
-  
-  // Date/Time Picker States
-  const [showPicker, setShowPicker] = useState(false);
-  const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
-  const [activeField, setActiveField] = useState<'start' | 'end'>('start');
 
-  // Venue Search & Creation States
+  const defaultStart = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  const defaultEnd = new Date(Date.now() + 3 * 60 * 60 * 1000);
+
+  const [startDate, setStartDate] = useState<Date>(defaultStart);
+  const [endDate, setEndDate] = useState<Date>(defaultEnd);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  // Venue Search / Create States
   const [venueQuery, setVenueQuery] = useState('');
-  const [venueResults, setVenueResults] = useState<Venue[]>([]);
-  const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
-  const [createNewVenueMode, setCreateNewVenueMode] = useState(false);
-  const [isSearchingVenues, setIsSearchingVenues] = useState(false);
+  const [venueResults, setVenueResults] = useState<VenueOption[]>([]);
+  const [selectedVenue, setSelectedVenue] = useState<VenueOption | null>(null);
+  const [searchingVenues, setSearchingVenues] = useState(false);
 
-  // Participant Search & Selection States
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Profile[]>([]);
-  const [selectedParticipants, setSelectedParticipants] = useState<Profile[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Invitees States
+  const [inviteQuery, setInviteQuery] = useState('');
+  const [inviteResults, setInviteResults] = useState<ProfileOption[]>([]);
+  const [selectedInvitees, setSelectedInvitees] = useState<ProfileOption[]>([]);
+  const [searchingUsers, setSearchingUsers] = useState(false);
 
-  // --- Picker Helpers ---
-  const openPicker = (field: 'start' | 'end', mode: 'date' | 'time') => {
-    setActiveField(field);
-    setPickerMode(mode);
-    setShowPicker(true);
-  };
+  const [submitting, setSubmitting] = useState(false);
 
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    setShowPicker(false);
-    if (selectedDate) {
-      if (activeField === 'start') {
-        setStartDate(selectedDate);
-        if (selectedDate >= endDate) {
-          setEndDate(new Date(selectedDate.getTime() + 60 * 60 * 1000));
-        }
-      } else {
-        setEndDate(selectedDate);
+  useEffect(() => {
+    async function loadUser() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        setCurrentUserId(user.id);
       }
     }
-  };
+    loadUser();
+  }, []);
 
-  // --- Venue Search & Selection Logic ---
   async function handleVenueSearch(text: string) {
     setVenueQuery(text);
     setSelectedVenue(null);
-    setCreateNewVenueMode(false);
 
     if (text.trim().length < 1) {
       setVenueResults([]);
       return;
     }
 
-    setIsSearchingVenues(true);
+    setSearchingVenues(true);
     try {
       const { data, error } = await supabase
         .from('venues')
-        .select('id, name, creator_id')
+        .select('id, name, description, image_url')
         .ilike('name', `%${text.trim()}%`)
         .order('name', { ascending: true })
         .limit(6);
@@ -100,443 +94,578 @@ export default function CreateEventScreen() {
       if (error) throw error;
       setVenueResults(data || []);
     } catch (err: any) {
-      console.error('Error searching venues:', err.message);
+      console.error('Venue search error:', err.message);
     } finally {
-      setIsSearchingVenues(false);
+      setSearchingVenues(false);
     }
   }
 
-  function selectExistingVenue(venue: Venue) {
+  function handleSelectVenue(venue: VenueOption) {
     setSelectedVenue(venue);
     setVenueQuery(venue.name);
     setVenueResults([]);
-    setCreateNewVenueMode(false);
   }
 
-  function enableCreateNewVenue() {
-    setSelectedVenue(null);
-    setCreateNewVenueMode(true);
-    setVenueResults([]);
-  }
-
-  function clearVenue() {
+  function handleClearVenue() {
     setSelectedVenue(null);
     setVenueQuery('');
     setVenueResults([]);
-    setCreateNewVenueMode(false);
   }
 
-  // --- Participant Search & Selection Logic ---
-  async function handleSearch(text: string) {
-    setSearchQuery(text);
+  async function handleInviteSearch(text: string) {
+    setInviteQuery(text);
     if (text.trim().length < 2) {
-      setSearchResults([]);
+      setInviteResults([]);
       return;
     }
 
-    setIsSearching(true);
+    setSearchingUsers(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const excludedIds = selectedInvitees.map(u => u.id);
+      if (currentUserId) excludedIds.push(currentUserId);
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('profiles')
-        .select('id, email, full_name')
+        .select('id, email, full_name, avatar_url')
         .ilike('email', `%${text.trim()}%`)
-        .neq('id', user?.id || '') // Exclude current user
-        .limit(5);
+        .limit(6);
 
+      if (excludedIds.length > 0) {
+        query = query.not('id', 'in', `(${excludedIds.join(',')})`);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
-      setSearchResults(data || []);
+      setInviteResults(data || []);
     } catch (err: any) {
-      console.error('Error searching profiles:', err.message);
+      console.error('User search error:', err.message);
     } finally {
-      setIsSearching(false);
+      setSearchingUsers(false);
     }
   }
 
-  function addParticipant(profile: Profile) {
-    if (selectedParticipants.some(p => p.id === profile.id)) {
-      Alert.alert('Notice', 'User is already added.');
-      return;
+  function addInvitee(userProfile: ProfileOption) {
+    setSelectedInvitees(prev => [...prev, userProfile]);
+    setInviteQuery('');
+    setInviteResults([]);
+  }
+
+  function removeInvitee(userId: string) {
+    setSelectedInvitees(prev => prev.filter(u => u.id !== userId));
+  }
+
+  const pickStartDateTime = () => {
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: startDate,
+        mode: 'date',
+        onChange: (event, selected) => {
+          if (event.type === 'set' && selected) {
+            DateTimePickerAndroid.open({
+              value: selected,
+              mode: 'time',
+              onChange: (timeEvent, selectedTime) => {
+                if (timeEvent.type === 'set' && selectedTime) {
+                  const next = new Date(selected);
+                  next.setHours(selectedTime.getHours());
+                  next.setMinutes(selectedTime.getMinutes());
+                  setStartDate(next);
+                  if (endDate.getTime() <= next.getTime()) {
+                    setEndDate(new Date(next.getTime() + 60 * 60 * 1000));
+                  }
+                }
+              },
+            });
+          }
+        },
+      });
+    } else {
+      setShowStartPicker(true);
     }
-    setSelectedParticipants([...selectedParticipants, profile]);
-    setSearchQuery('');
-    setSearchResults([]);
-  }
+  };
 
-  function removeParticipant(id: string) {
-    setSelectedParticipants(selectedParticipants.filter(p => p.id !== id));
-  }
+  const pickEndDateTime = () => {
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: endDate,
+        mode: 'date',
+        onChange: (event, selected) => {
+          if (event.type === 'set' && selected) {
+            DateTimePickerAndroid.open({
+              value: selected,
+              mode: 'time',
+              onChange: (timeEvent, selectedTime) => {
+                if (timeEvent.type === 'set' && selectedTime) {
+                  const next = new Date(selected);
+                  next.setHours(selectedTime.getHours());
+                  next.setMinutes(selectedTime.getMinutes());
+                  setEndDate(next);
+                }
+              },
+            });
+          }
+        },
+      });
+    } else {
+      setShowEndPicker(true);
+    }
+  };
 
-  // --- Submit & Save Venue + Event + Participants ---
   async function handleCreateEvent() {
     if (!title.trim()) {
-      Alert.alert('Error', 'Please enter an event title.');
+      Alert.alert('Validation Error', 'Please enter an event title.');
       return;
     }
 
-    if (endDate <= startDate) {
-      Alert.alert('Error', 'End time must be after the start time.');
+    if (endDate.getTime() < startDate.getTime()) {
+      Alert.alert('Validation Error', 'End time must be after start time.');
       return;
     }
 
-    if (createNewVenueMode && !venueQuery.trim()) {
-      Alert.alert('Error', 'Please enter a name for the new venue.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    let newlyCreatedVenueId: string | null = null;
-
+    setSubmitting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const organizerId = user?.id || currentUserId;
+      if (!organizerId) {
+        throw new Error('You must be signed in to create an event.');
+      }
 
-      // 1. Resolve venue_id: existing selected venue, newly created venue, or null
-      let resolvedVenueId: string | null = selectedVenue ? selectedVenue.id : null;
-
-      if (!resolvedVenueId && venueQuery.trim().length > 0) {
+      // 1. Resolve existing or newly typed venue
+      let resolvedVenue: VenueOption | null = selectedVenue;
+      const trimmedVenue = venueQuery.trim();
+      if (!resolvedVenue && trimmedVenue.length > 0) {
         const { data: createdVenue, error: venueError } = await supabase
           .from('venues')
           .insert({
-            name: venueQuery.trim(),
-            creator_id: user.id,
+            name: trimmedVenue,
+            creator_id: organizerId,
           })
-          .select('id, name')
+          .select('id, name, description, image_url')
           .single();
 
         if (venueError) throw venueError;
-        resolvedVenueId = createdVenue.id;
-        newlyCreatedVenueId = createdVenue.id;
+        resolvedVenue = createdVenue;
       }
 
-      // 2. Create the Event with resolved venue_id
-      const { data: eventData, error: eventError } = await supabase
+      // 2. Insert event
+      const startIso = startDate.toISOString();
+      const endIso = endDate.toISOString();
+
+      const { data: createdEvent, error: eventError } = await supabase
         .from('events')
         .insert({
           title: title.trim(),
           description: description.trim() || null,
-          start_time: startDate.toISOString(),
-          end_time: endDate.toISOString(),
-          venue_id: resolvedVenueId,
-          created_by: user.id,
+          start_time: startIso,
+          end_time: endIso,
+          venue_id: resolvedVenue ? resolvedVenue.id : null,
+          created_by: organizerId,
         })
-        .select()
+        .select('*')
         .single();
 
       if (eventError) throw eventError;
 
-      // 3. Batch-insert Invited Participants into event_participants junction table
-      if (selectedParticipants.length > 0) {
-        const participantRows = selectedParticipants.map(profile => ({
-          event_id: eventData.id,
-          user_id: profile.id,
+      // 3. Add organizer + invited participants
+      const participantRows = [
+        {
+          event_id: createdEvent.id,
+          user_id: organizerId,
+          status: 'accepted',
+        },
+        ...selectedInvitees.map(inv => ({
+          event_id: createdEvent.id,
+          user_id: inv.id,
           status: 'pending',
-        }));
+        })),
+      ];
 
-        const { error: participantError } = await supabase
-          .from('event_participants')
-          .insert(participantRows);
+      const { error: partError } = await supabase
+        .from('event_participants')
+        .insert(participantRows);
 
-        if (participantError) throw participantError;
-      }
+      if (partError) throw partError;
 
-      router.back();
+      // 4. Schedule stand-by 1-hour reminder notification
+      await scheduleOneHourEventReminder({
+        eventId: createdEvent.id,
+        title: createdEvent.title,
+        startTimeIso: createdEvent.start_time,
+        venueName: resolvedVenue?.name ?? null,
+      });
+   
+
+      router.replace(`/event/${createdEvent.id}` as any);
     } catch (error: any) {
-      // Roll back newly created venue if event or participant creation fails
-      if (newlyCreatedVenueId) {
-        await supabase.from('venues').delete().eq('id', newlyCreatedVenueId);
-      }
-      Alert.alert('Error', error.message);
+      Alert.alert('Create Failed', error.message || 'Could not create event.');
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
   }
 
-  const trimmedVenueQuery = venueQuery.trim();
-  const hasExactMatch = venueResults.some(
-    v => v.name.trim().toLowerCase() === trimmedVenueQuery.toLowerCase()
-  );
-
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: '#F8F9FA' }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      <ScrollView 
-        contentContainerStyle={styles.container} 
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.headerTitle}>Create New Event</Text>
-
-        {/* Event Details */}
-        <Text style={styles.label}>Event Title</Text>
-        <TextInput 
-          style={styles.input} 
-          placeholder="e.g., Team Sync" 
-          placeholderTextColor="#999"
-          value={title}
-          onChangeText={setTitle}
-        />
-
-        <Text style={styles.label}>Description</Text>
-        <TextInput 
-          style={[styles.input, styles.textArea]} 
-          placeholder="Optional details..." 
-          placeholderTextColor="#999"
-          multiline
-          value={description}
-          onChangeText={setDescription}
-        />
-
-        {/* Date & Time Selectors */}
-        <Text style={styles.label}>Start Time</Text>
-        <View style={styles.dateTimeRow}>
-          <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('start', 'date')}>
-            <Text style={styles.pickerButtonText}>📅 {startDate.toLocaleDateString()}</Text>
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={20} color="#111" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('start', 'time')}>
-            <Text style={styles.pickerButtonText}>🕒 {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Create Event</Text>
+          <View style={{ width: 38 }} />
         </View>
 
-        <Text style={styles.label}>End Time</Text>
-        <View style={styles.dateTimeRow}>
-          <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('end', 'date')}>
-            <Text style={styles.pickerButtonText}>📅 {endDate.toLocaleDateString()}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('end', 'time')}>
-            <Text style={styles.pickerButtonText}>🕒 {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {showPicker && (
-          <DateTimePicker
-            value={activeField === 'start' ? startDate : endDate}
-            mode={pickerMode}
-            display="default"
-            onChange={onDateChange}
-          />
-        )}
-
-        {/* --- Venue Section --- */}
-        <Text style={styles.label}>Venue (Search or Add New)</Text>
-
-        <View style={styles.searchContainer}>
-          <Ionicons name="location-outline" size={18} color="#888" style={styles.searchIcon} />
+        <View style={styles.card}>
+          <Text style={styles.label}>Event Title *</Text>
           <TextInput
-            style={styles.searchInput}
-            placeholder="Search existing venue or type a new one..."
+            style={styles.input}
+            placeholder="e.g., Team Lunch or Outdoor Run"
             placeholderTextColor="#999"
-            value={venueQuery}
-            onChangeText={handleVenueSearch}
+            value={title}
+            onChangeText={setTitle}
           />
-          {isSearchingVenues && <ActivityIndicator size="small" color="#007AFF" />}
-          {venueQuery.length > 0 && !isSearchingVenues && (
-            <TouchableOpacity onPress={clearVenue}>
-              <Ionicons name="close-circle" size={18} color="#888" />
-            </TouchableOpacity>
-          )}
-        </View>
 
-        {/* Selected Existing Venue Badge */}
-        {selectedVenue && (
-          <View style={styles.selectedVenueBadge}>
-            <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
-            <Text style={styles.selectedVenueText}>Using existing venue: {selectedVenue.name}</Text>
-          </View>
-        )}
+          <Text style={styles.label}>Description</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Add agenda, notes, or details..."
+            placeholderTextColor="#999"
+            value={description}
+            onChangeText={setDescription}
+            multiline
+          />
 
-        {/* New Venue Mode Badge */}
-        {createNewVenueMode && trimmedVenueQuery.length > 0 && !selectedVenue && (
-          <View style={styles.newVenueBadge}>
-            <Ionicons name="add-circle" size={18} color="#007AFF" />
-            <Text style={styles.newVenueText}>Will create new venue: "{trimmedVenueQuery}"</Text>
-          </View>
-        )}
-
-        {/* Venue Search Results + Create Option */}
-        {!selectedVenue && trimmedVenueQuery.length > 0 && (venueResults.length > 0 || !hasExactMatch) && !createNewVenueMode && (
-          <View style={styles.resultsContainer}>
-            {venueResults.map(venue => (
-              <TouchableOpacity
-                key={venue.id}
-                style={styles.resultItem}
-                onPress={() => selectExistingVenue(venue)}
-              >
-                <View>
-                  <Text style={styles.resultEmail}>{venue.name}</Text>
-                  <Text style={styles.resultName}>Existing venue</Text>
-                </View>
-                <Ionicons name="return-down-forward" size={18} color="#007AFF" />
+          <Text style={styles.label}>Start Time</Text>
+          <TouchableOpacity style={styles.pickerButton} onPress={pickStartDateTime}>
+            <Text style={styles.pickerText}>🕒 {startDate.toLocaleString()}</Text>
+          </TouchableOpacity>
+          {Platform.OS === 'ios' && showStartPicker && (
+            <View style={styles.iosPickerBox}>
+              <DateTimePicker
+                value={startDate}
+                mode="datetime"
+                display="spinner"
+                onChange={(_, selected) => {
+                  if (selected) {
+                    setStartDate(selected);
+                    if (endDate.getTime() <= selected.getTime()) {
+                      setEndDate(new Date(selected.getTime() + 60 * 60 * 1000));
+                    }
+                  }
+                }}
+              />
+              <TouchableOpacity style={styles.doneBtn} onPress={() => setShowStartPicker(false)}>
+                <Text style={styles.doneBtnText}>Done</Text>
               </TouchableOpacity>
-            ))}
+            </View>
+          )}
 
-            {!hasExactMatch && (
-              <TouchableOpacity
-                style={styles.createVenueOption}
-                onPress={enableCreateNewVenue}
-              >
-                <Text style={styles.createVenueText}>+ Add "{trimmedVenueQuery}" as a new venue</Text>
-                <Ionicons name="add-circle-outline" size={20} color="#007AFF" />
+          <Text style={styles.label}>End Time</Text>
+          <TouchableOpacity style={styles.pickerButton} onPress={pickEndDateTime}>
+            <Text style={styles.pickerText}>🏁 {endDate.toLocaleString()}</Text>
+          </TouchableOpacity>
+          {Platform.OS === 'ios' && showEndPicker && (
+            <View style={styles.iosPickerBox}>
+              <DateTimePicker
+                value={endDate}
+                mode="datetime"
+                display="spinner"
+                onChange={(_, selected) => {
+                  if (selected) setEndDate(selected);
+                }}
+              />
+              <TouchableOpacity style={styles.doneBtn} onPress={() => setShowEndPicker(false)}>
+                <Text style={styles.doneBtnText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <Text style={styles.label}>Venue</Text>
+          <View style={styles.searchBox}>
+            <Ionicons name="location-outline" size={18} color="#888" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search existing venue or type a new one..."
+              placeholderTextColor="#999"
+              value={venueQuery}
+              onChangeText={handleVenueSearch}
+            />
+            {searchingVenues && <ActivityIndicator size="small" color="#007AFF" />}
+            {venueQuery.length > 0 && !searchingVenues && (
+              <TouchableOpacity onPress={handleClearVenue}>
+                <Ionicons name="close-circle" size={18} color="#888" />
               </TouchableOpacity>
             )}
           </View>
-        )}
 
-        {/* --- Participants Section --- */}
-        <Text style={styles.label}>Add Participants</Text>
-        
-        {/* Search Input */}
-        <View style={styles.searchContainer}>
-          <Ionicons name="search-outline" size={18} color="#888" style={styles.searchIcon} />
-          <TextInput 
-            style={styles.searchInput}
-            placeholder="Search user by email..."
-            placeholderTextColor="#999"
-            value={searchQuery}
-            onChangeText={handleSearch}
-            autoCapitalize="none"
-          />
-          {isSearching && <ActivityIndicator size="small" color="#007AFF" />}
-        </View>
-
-        {/* Dropdown Search Results */}
-        {searchResults.length > 0 && (
-          <View style={styles.resultsContainer}>
-            {searchResults.map(item => (
-              <TouchableOpacity 
-                key={item.id} 
-                style={styles.resultItem}
-                onPress={() => addParticipant(item)}
-              >
-                <View>
-                  <Text style={styles.resultEmail}>{item.email}</Text>
-                  {item.full_name ? <Text style={styles.resultName}>{item.full_name}</Text> : null}
-                </View>
-                <Ionicons name="add-circle-outline" size={22} color="#007AFF" />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Selected Participants Chips */}
-        {selectedParticipants.length > 0 && (
-          <View style={styles.chipsContainer}>
-            {selectedParticipants.map(participant => (
-              <View key={participant.id} style={styles.chip}>
-                <Text style={styles.chipText} numberOfLines={1}>{participant.email}</Text>
-                <TouchableOpacity onPress={() => removeParticipant(participant.id)}>
-                  <Ionicons name="close-circle" size={18} color="#666" />
+          {venueResults.length > 0 && (
+            <View style={styles.resultsBox}>
+              {venueResults.map(v => (
+                <TouchableOpacity
+                  key={v.id}
+                  style={styles.resultRow}
+                  onPress={() => handleSelectVenue(v)}
+                >
+                  <View style={styles.resultLeft}>
+                    {v.image_url ? (
+                      <Image source={{ uri: v.image_url }} style={styles.venueThumb} />
+                    ) : (
+                      <Ionicons name="location-outline" size={18} color="#007AFF" />
+                    )}
+                    <Text style={styles.resultText}>{v.name}</Text>
+                  </View>
+                  <Ionicons name="checkmark-circle-outline" size={18} color="#007AFF" />
                 </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Submit Button */}
-        <TouchableOpacity 
-          style={[styles.submitButton, isSubmitting && styles.disabledButton]} 
-          onPress={handleCreateEvent}
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.submitButtonText}>Save Event</Text>
+              ))}
+            </View>
           )}
-        </TouchableOpacity>
+
+          <Text style={styles.label}>Invite Participants (by email)</Text>
+          <View style={styles.searchBox}>
+            <Ionicons name="person-add-outline" size={18} color="#888" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search user email..."
+              placeholderTextColor="#999"
+              value={inviteQuery}
+              onChangeText={handleInviteSearch}
+              autoCapitalize="none"
+            />
+            {searchingUsers && <ActivityIndicator size="small" color="#007AFF" />}
+          </View>
+
+          {inviteResults.length > 0 && (
+            <View style={styles.resultsBox}>
+              {inviteResults.map(u => (
+                <TouchableOpacity
+                  key={u.id}
+                  style={styles.resultRow}
+                  onPress={() => addInvitee(u)}
+                >
+                  <Text style={styles.resultText}>{u.full_name || u.email}</Text>
+                  <Ionicons name="add-circle-outline" size={18} color="#007AFF" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {selectedInvitees.length > 0 && (
+            <View style={styles.chipsRow}>
+              {selectedInvitees.map(inv => (
+                <View key={inv.id} style={styles.inviteChip}>
+                  <Text style={styles.inviteChipText} numberOfLines={1}>
+                    {inv.full_name || inv.email}
+                  </Text>
+                  <TouchableOpacity onPress={() => removeInvitee(inv.id)}>
+                    <Ionicons name="close-circle" size={16} color="#6B7280" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <View style={styles.reminderNote}>
+            <Ionicons name="notifications-outline" size={16} color="#007AFF" />
+            <Text style={styles.reminderNoteText}>
+              A stand-by reminder will be scheduled for 1 hour before start time.
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.submitBtn, submitting && styles.disabledBtn]}
+            onPress={handleCreateEvent}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Text style={styles.submitBtnText}>Create Event</Text>
+            )}
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    padding: 20, 
-    flexGrow: 1, 
+  container: {
+    flexGrow: 1,
+    backgroundColor: '#F8F9FA',
     paddingTop: 60,
-    paddingBottom: 150
+    paddingHorizontal: 16,
+    paddingBottom: 50,
   },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#111', marginBottom: 20 },
-  label: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 6, marginTop: 14 },
-  input: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EFEFEF', padding: 12, borderRadius: 8, fontSize: 15, color: '#111' },
-  textArea: { height: 80, textAlignVertical: 'top' },
-  dateTimeRow: { flexDirection: 'row', gap: 10 },
-  pickerButton: { flex: 1, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EFEFEF', padding: 14, borderRadius: 8, alignItems: 'center' },
-  pickerButtonText: { fontSize: 14, color: '#007AFF', fontWeight: '600' },
-  searchContainer: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#EFEFEF',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-  },
-  searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: '#111' },
-  selectedVenueBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: '#ECFDF5',
-    borderRadius: 8,
-  },
-  selectedVenueText: { fontSize: 13, color: '#15803D', fontWeight: '600' },
-  newVenueBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: '#EBF3FF',
-    borderRadius: 8,
-  },
-  newVenueText: { fontSize: 13, color: '#007AFF', fontWeight: '600' },
-  createVenueOption: {
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#F8FBFF',
+    marginBottom: 16,
   },
-  createVenueText: { fontSize: 14, color: '#007AFF', fontWeight: '600' },
-  resultsContainer: {
+  backBtn: {
     backgroundColor: '#FFF',
+    padding: 8,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#EFEFEF',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111',
+  },
+  card: {
+    backgroundColor: '#FFF',
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 11,
+    fontSize: 15,
+    color: '#111',
+  },
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  pickerButton: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 12,
+  },
+  pickerText: {
+    fontSize: 14,
+    color: '#111',
+    fontWeight: '500',
+  },
+  iosPickerBox: {
+    marginTop: 6,
+  },
+  doneBtn: {
+    backgroundColor: '#007AFF',
+    padding: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  doneBtnText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#111',
+  },
+  resultsBox: {
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     borderRadius: 8,
     marginTop: 4,
-    overflow: 'hidden',
   },
-  resultItem: {
+  resultRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
+    padding: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#F3F4F6',
   },
-  resultEmail: { fontSize: 14, color: '#111', fontWeight: '500' },
-  resultName: { fontSize: 12, color: '#666' },
-  chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  chip: {
+  resultLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+  },
+  venueThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: '#E5E7EB',
+  },
+  resultText: {
+    fontSize: 14,
+    color: '#111',
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  inviteChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: '#EBF3FF',
     paddingVertical: 6,
     paddingHorizontal: 10,
-    borderRadius: 16,
-    gap: 6,
+    borderRadius: 999,
   },
-  chipText: { fontSize: 13, color: '#007AFF', fontWeight: '500', maxWidth: 180 },
-  submitButton: { backgroundColor: '#007AFF', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 30 },
-  disabledButton: { backgroundColor: '#A0C7FF' },
-  submitButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  inviteChipText: {
+    fontSize: 12,
+    color: '#1D4ED8',
+    fontWeight: '600',
+    maxWidth: 150,
+  },
+  reminderNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F0F7FF',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 18,
+  },
+  reminderNoteText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#1E40AF',
+  },
+  submitBtn: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 18,
+  },
+  submitBtnText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  disabledBtn: {
+    opacity: 0.6,
+  },
 });
