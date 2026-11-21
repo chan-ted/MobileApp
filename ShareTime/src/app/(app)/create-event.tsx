@@ -32,6 +32,15 @@ type ProfileOption = {
   avatar_url?: string | null;
 };
 
+function getInitials(profile: ProfileOption): string {
+  const source = (profile.full_name || profile.email || '?').trim();
+  const parts = source.split(/\s+/);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
+}
+
 export default function CreateEventScreen() {
   const router = useRouter();
 
@@ -295,7 +304,6 @@ export default function CreateEventScreen() {
         startTimeIso: createdEvent.start_time,
         venueName: resolvedVenue?.name ?? null,
       });
-   
 
       router.replace(`/event/${createdEvent.id}` as any);
     } catch (error: any) {
@@ -384,6 +392,7 @@ export default function CreateEventScreen() {
             </View>
           )}
 
+          {/* VENUE SECTION */}
           <Text style={styles.label}>Venue</Text>
           <View style={styles.searchBox}>
             <Ionicons name="location-outline" size={18} color="#888" />
@@ -412,11 +421,22 @@ export default function CreateEventScreen() {
                 >
                   <View style={styles.resultLeft}>
                     {v.image_url ? (
-                      <Image source={{ uri: v.image_url }} style={styles.venueThumb} />
+                      <Image source={{ uri: v.image_url }} style={styles.venueResultThumb} />
                     ) : (
-                      <Ionicons name="location-outline" size={18} color="#007AFF" />
+                      <View style={styles.venueResultPlaceholder}>
+                        <Ionicons name="location-outline" size={18} color="#007AFF" />
+                      </View>
                     )}
-                    <Text style={styles.resultText}>{v.name}</Text>
+                    <View style={styles.resultTextCol}>
+                      <Text style={styles.resultText} numberOfLines={1}>
+                        {v.name}
+                      </Text>
+                      {!!v.description && (
+                        <Text style={styles.resultSubtext} numberOfLines={1}>
+                          {v.description}
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   <Ionicons name="checkmark-circle-outline" size={18} color="#007AFF" />
                 </TouchableOpacity>
@@ -424,6 +444,36 @@ export default function CreateEventScreen() {
             </View>
           )}
 
+          {selectedVenue && (
+            <View style={styles.selectedVenueCard}>
+              {selectedVenue.image_url ? (
+                <Image
+                  source={{ uri: selectedVenue.image_url }}
+                  style={styles.selectedVenueBanner}
+                />
+              ) : (
+                <View style={styles.selectedVenueBannerPlaceholder}>
+                  <Ionicons name="image-outline" size={26} color="#9CA3AF" />
+                  <Text style={styles.placeholderLabel}>No venue photo</Text>
+                </View>
+              )}
+              <View style={styles.selectedVenueBody}>
+                <View style={styles.selectedVenueHeaderRow}>
+                  <Text style={styles.selectedVenueTitle}>{selectedVenue.name}</Text>
+                  <TouchableOpacity onPress={handleClearVenue} hitSlop={8}>
+                    <Ionicons name="close-circle" size={20} color="#6B7280" />
+                  </TouchableOpacity>
+                </View>
+                {!!selectedVenue.description && (
+                  <Text style={styles.selectedVenueDesc} numberOfLines={2}>
+                    {selectedVenue.description}
+                  </Text>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* PARTICIPANTS SECTION */}
           <Text style={styles.label}>Invite Participants (by email)</Text>
           <View style={styles.searchBox}>
             <Ionicons name="person-add-outline" size={18} color="#888" />
@@ -446,7 +496,25 @@ export default function CreateEventScreen() {
                   style={styles.resultRow}
                   onPress={() => addInvitee(u)}
                 >
-                  <Text style={styles.resultText}>{u.full_name || u.email}</Text>
+                  <View style={styles.resultLeft}>
+                    {u.avatar_url ? (
+                      <Image source={{ uri: u.avatar_url }} style={styles.userResultAvatar} />
+                    ) : (
+                      <View style={styles.userAvatarFallback}>
+                        <Text style={styles.userAvatarFallbackText}>{getInitials(u)}</Text>
+                      </View>
+                    )}
+                    <View style={styles.resultTextCol}>
+                      <Text style={styles.resultText} numberOfLines={1}>
+                        {u.full_name || u.email}
+                      </Text>
+                      {!!u.full_name && (
+                        <Text style={styles.resultSubtext} numberOfLines={1}>
+                          {u.email}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
                   <Ionicons name="add-circle-outline" size={18} color="#007AFF" />
                 </TouchableOpacity>
               ))}
@@ -457,10 +525,17 @@ export default function CreateEventScreen() {
             <View style={styles.chipsRow}>
               {selectedInvitees.map(inv => (
                 <View key={inv.id} style={styles.inviteChip}>
+                  {inv.avatar_url ? (
+                    <Image source={{ uri: inv.avatar_url }} style={styles.inviteChipAvatar} />
+                  ) : (
+                    <View style={styles.inviteChipAvatarFallback}>
+                      <Text style={styles.inviteChipAvatarText}>{getInitials(inv)}</Text>
+                    </View>
+                  )}
                   <Text style={styles.inviteChipText} numberOfLines={1}>
                     {inv.full_name || inv.email}
                   </Text>
-                  <TouchableOpacity onPress={() => removeInvitee(inv.id)}>
+                  <TouchableOpacity onPress={() => removeInvitee(inv.id)} hitSlop={6}>
                     <Ionicons name="close-circle" size={16} color="#6B7280" />
                   </TouchableOpacity>
                 </View>
@@ -594,6 +669,7 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     borderRadius: 8,
     marginTop: 4,
+    overflow: 'hidden',
   },
   resultRow: {
     flexDirection: 'row',
@@ -606,17 +682,100 @@ const styles = StyleSheet.create({
   resultLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    marginRight: 8,
+  },
+  resultTextCol: {
+    flex: 1,
+  },
+  venueResultThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#E5E7EB',
+  },
+  venueResultPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedVenueCard: {
+    marginTop: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#DCEBFE',
+    backgroundColor: '#F8FBFF',
+    overflow: 'hidden',
+  },
+  selectedVenueBanner: {
+    width: '100%',
+    height: 140,
+    backgroundColor: '#E5E7EB',
+  },
+  selectedVenueBannerPlaceholder: {
+    width: '100%',
+    height: 90,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  placeholderLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  selectedVenueBody: {
+    padding: 10,
+  },
+  selectedVenueHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 8,
   },
-  venueThumb: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
+  selectedVenueTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    flex: 1,
+  },
+  selectedVenueDesc: {
+    fontSize: 12,
+    color: '#4B5563',
+    marginTop: 4,
+  },
+  userResultAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#E5E7EB',
+  },
+  userAvatarFallback: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userAvatarFallbackText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1D4ED8',
   },
   resultText: {
     fontSize: 14,
+    fontWeight: '500',
     color: '#111',
+  },
+  resultSubtext: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 1,
   },
   chipsRow: {
     flexDirection: 'row',
@@ -629,15 +788,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#EBF3FF',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingVertical: 5,
+    paddingLeft: 5,
+    paddingRight: 10,
     borderRadius: 999,
+  },
+  inviteChipAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#DBEAFE',
+  },
+  inviteChipAvatarFallback: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#BFDBFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inviteChipAvatarText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#1E40AF',
   },
   inviteChipText: {
     fontSize: 12,
     color: '#1D4ED8',
     fontWeight: '600',
-    maxWidth: 150,
+    maxWidth: 140,
   },
   reminderNote: {
     flexDirection: 'row',
