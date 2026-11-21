@@ -12,7 +12,7 @@ import {
   KeyboardAvoidingView,
   Image,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { supabase } from '@/lib/supabase';
@@ -315,18 +315,26 @@ export default function CreateEventScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#F8F9FA' }}
+      style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={20} color="#111" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Create Event</Text>
-          <View style={{ width: 38 }} />
-        </View>
+      <Stack.Screen options={{ headerShown: false }} />
 
+      {/* Fixed Header */}
+      <View style={styles.headerRow}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={20} color="#111" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Create Event</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      {/* Scrollable Form */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.card}>
           <Text style={styles.label}>Event Title *</Text>
           <TextInput
@@ -567,31 +575,49 @@ export default function CreateEventScreen() {
   );
 }
 
+const PAGE_BG = '#F8F9FA';
+
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    backgroundColor: '#F8F9FA',
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 50,
+  screen: {
+    flex: 1,
+    backgroundColor: PAGE_BG,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    backgroundColor: PAGE_BG,
+    paddingTop: 60,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    zIndex: 10,
   },
   backBtn: {
+    width: 38,
+    height: 38,
     backgroundColor: '#FFF',
-    padding: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#EFEFEF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 18,
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 22,
     fontWeight: '700',
     color: '#111',
+  },
+  headerSpacer: {
+    width: 38,
+  },
+  container: {
+    flexGrow: 1,
+    backgroundColor: PAGE_BG,
+    paddingTop: 4,
+    paddingHorizontal: 16,
+    paddingBottom: 50,
   },
   card: {
     backgroundColor: '#FFF',
