@@ -498,7 +498,7 @@ const styles = StyleSheet.create({
 
   listContent: { paddingHorizontal: 16, paddingBottom: 100 },
   eventCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
@@ -549,7 +549,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(0, 122, 255, 0.55)',
+    backgroundColor: 'rgba(0, 122, 255, 0.3)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.5)',
     paddingVertical: 12,

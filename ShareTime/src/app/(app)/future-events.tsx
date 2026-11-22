@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 },
   timeText: { fontSize: 12, color: '#0066CC', fontWeight: '600', flexShrink: 1 },
 
-  countdownBadge: { paddingVertical: 3, paddingHorizontal: 12, borderRadius: 999 },
+  countdownBadge: { paddingVertical: 2, paddingHorizontal: 16, borderRadius: 999 },
   countdownBadgeText: { fontSize: 10, fontWeight: '700' },
   countdownSoonBadge: { backgroundColor: 'rgba(255, 237, 213, 0.95)' },
   countdownSoonText: { color: '#C2410C' },
