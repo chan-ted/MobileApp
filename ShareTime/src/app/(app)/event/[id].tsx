@@ -487,7 +487,6 @@ export default function EventDetailScreen() {
             <View style={styles.headerSection}>
               {/* Event Info Card */}
               <View style={styles.card}>
-                <View style={styles.cardTopRow}>
                   <Text style={styles.cardTitleHeading} numberOfLines={2}>
                     {title || 'Untitled Event'}
                   </Text>
@@ -509,7 +508,7 @@ export default function EventDetailScreen() {
                       )}
                     </View>
                   )}
-                </View>
+              
 
                 {/* Your RSVP Status Selector (Accepted / Pending / Declined) */}
                 <Text style={styles.label}>Your RSVP Status</Text>
@@ -751,7 +750,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   cardTitleHeading: {
-    flex: 1,
     fontSize: 20,
     fontWeight: '700',
     color: '#111',
@@ -760,8 +758,9 @@ const styles = StyleSheet.create({
   organizerActionsGroup: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-end',
     gap: 6,
-    flexShrink: 0,
+    marginTop: 8,
   },
   inlineEditIconButton: {
     width: 30,
