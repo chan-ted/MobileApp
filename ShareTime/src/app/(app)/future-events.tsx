@@ -93,6 +93,45 @@ function getStatusBadgeStyle(isOrganizer: boolean, status: EventStatus) {
   };
 }
 
+function getCountdownBadgeStyle(startTimeIso: string) {
+  const diffMs = Math.max(0, new Date(startTimeIso).getTime() - Date.now());
+  const totalMinutes = Math.floor(diffMs / (1000 * 60));
+  const totalHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const totalWeeks = Math.floor(totalDays / 7);
+
+  let label = 'Soon';
+  if (totalMinutes < 60) {
+    label = totalMinutes <= 1 ? 'in 1m' : `in ${totalMinutes}m`;
+  } else if (totalHours < 24) {
+    label = totalHours === 1 ? 'in 1h' : `in ${totalHours}h`;
+  } else if (totalDays < 7) {
+    label = totalDays === 1 ? '1 day' : `${totalDays} days`;
+  } else {
+    label = totalWeeks === 1 ? '1 week' : `${totalWeeks} weeks`;
+  }
+
+  if (totalHours < 24) {
+    return {
+      badge: styles.countdownSoonBadge,
+      text: styles.countdownSoonText,
+      label,
+    };
+  }
+  if (totalDays < 7) {
+    return {
+      badge: styles.countdownDaysBadge,
+      text: styles.countdownDaysText,
+      label,
+    };
+  }
+  return {
+    badge: styles.countdownWeeksBadge,
+    text: styles.countdownWeeksText,
+    label,
+  };
+}
+
 export default function FutureEventsScreen() {
   const router = useRouter();
   const [events, setEvents] = useState<FutureEventItem[]>([]);
@@ -311,6 +350,7 @@ export default function FutureEventsScreen() {
           }
           renderItem={({ item }) => {
             const statusMeta = getStatusBadgeStyle(item.isOrganizer, item.status);
+            const countdownMeta = getCountdownBadgeStyle(item.start_time);
 
             return (
               <TouchableOpacity
@@ -332,9 +372,14 @@ export default function FutureEventsScreen() {
                 <View style={styles.cardFooter}>
                   <View style={styles.timeRow}>
                     <Ionicons name="time-outline" size={14} color="#007AFF" />
-                    <Text style={styles.timeText}>
+                    <Text style={styles.timeText} numberOfLines={1}>
                       {new Date(item.start_time).toLocaleDateString()} at {new Date(item.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </Text>
+                    <View style={[styles.countdownBadge, countdownMeta.badge]}>
+                      <Text style={[styles.countdownBadgeText, countdownMeta.text]}>
+                        {countdownMeta.label}
+                      </Text>
+                    </View>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color="#555" />
                 </View>
@@ -389,8 +434,18 @@ const styles = StyleSheet.create({
 
   eventDescription: { fontSize: 13, color: '#374151', marginBottom: 12, lineHeight: 18 },
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: 'rgba(0, 0, 0, 0.08)', paddingTop: 10 },
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  timeText: { fontSize: 12, color: '#0066CC', fontWeight: '600' },
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 },
+  timeText: { fontSize: 12, color: '#0066CC', fontWeight: '600', flexShrink: 1 },
+
+  countdownBadge: { paddingVertical: 3, paddingHorizontal: 12, borderRadius: 999 },
+  countdownBadgeText: { fontSize: 10, fontWeight: '700' },
+  countdownSoonBadge: { backgroundColor: 'rgba(255, 237, 213, 0.95)' },
+  countdownSoonText: { color: '#C2410C' },
+  countdownDaysBadge: { backgroundColor: 'rgba(224, 231, 255, 0.95)' },
+  countdownDaysText: { color: '#3730A3' },
+  countdownWeeksBadge: { backgroundColor: 'rgba(243, 232, 255, 0.95)' },
+  countdownWeeksText: { color: '#6B21A8' },
+
   emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 80, gap: 12 },
   emptyText: { fontSize: 15, color: '#FFF', fontWeight: '500' },
 });
