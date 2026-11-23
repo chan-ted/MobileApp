@@ -200,6 +200,7 @@ export default function MyProfileScreen() {
       style={{ flex: 1, backgroundColor: '#F8F9FA' }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      
       <ScrollView
         contentContainerStyle={styles.container}
         refreshControl={

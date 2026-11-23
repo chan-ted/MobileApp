@@ -13,7 +13,7 @@ import {
   Platform,
   Image,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { pickAndUploadVenueImage } from '@/lib/uploadVenueImage';
@@ -38,6 +38,7 @@ type VenueEvent = {
 
 export default function VenueDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const venueId = Array.isArray(id) ? id[0] : id;
   const router = useRouter();
 
   const [venue, setVenue] = useState<Venue | null>(null);
@@ -60,8 +61,16 @@ export default function VenueDetailScreen() {
 
   const isCreator = Boolean(venue && currentUserId && venue.creator_id === currentUserId);
 
+  const handleGoBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/future-events' as any);
+    }
+  }, [router]);
+
   const fetchVenueAndEvents = useCallback(async (isRefresh = false) => {
-    if (!id) return;
+    if (!venueId) return;
 
     if (isRefresh) {
       setRefreshing(true);
@@ -78,7 +87,7 @@ export default function VenueDetailScreen() {
       const { data: venueData, error: venueError } = await supabase
         .from('venues')
         .select('id, creator_id, name, description, image_url, created_at')
-        .eq('id', id)
+        .eq('id', venueId)
         .single();
 
       if (venueError) throw venueError;
@@ -89,7 +98,7 @@ export default function VenueDetailScreen() {
       const { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select('id, title, description, start_time, end_time, created_by')
-        .eq('venue_id', id)
+        .eq('venue_id', venueId)
         .order('start_time', { ascending: true });
 
       if (eventsError) throw eventsError;
@@ -100,7 +109,7 @@ export default function VenueDetailScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [id]);
+  }, [venueId]);
 
   useEffect(() => {
     fetchVenueAndEvents(false);
@@ -224,6 +233,7 @@ export default function VenueDetailScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
+        <Stack.Screen options={{ headerShown: false }} />
         <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
@@ -232,8 +242,9 @@ export default function VenueDetailScreen() {
   if (!venue) {
     return (
       <View style={styles.centered}>
+        <Stack.Screen options={{ headerShown: false }} />
         <Text style={styles.emptyText}>Venue not found.</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={handleGoBack}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -241,255 +252,277 @@ export default function VenueDetailScreen() {
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={() => fetchVenueAndEvents(true)} />
-      }
-    >
-      {/* Top Navigation Row */}
+    <View style={styles.screen}>
+      <Stack.Screen options={{ headerShown: false }} />
+
+      {/* Fixed Top Navigation Row (outside ScrollView) */}
       <View style={styles.topNavRow}>
-        <TouchableOpacity style={styles.navBackBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.navBackBtn} onPress={handleGoBack}>
           <Ionicons name="arrow-back" size={20} color="#111" />
         </TouchableOpacity>
-        <Text style={styles.navHeaderTitle}>Venue Details</Text>
-        <View style={{ width: 38 }} />
+        <Text style={styles.navHeaderTitle} numberOfLines={1}>
+          Venue Details
+        </Text>
+        <View style={styles.headerSpacer} />
       </View>
 
-      {/* Venue Card */}
-      <View style={styles.card}>
-        {/* Venue Cover Photo */}
-        {venue.image_url ? (
-          <View style={styles.coverWrapper}>
-            <Image source={{ uri: venue.image_url }} style={styles.coverImage} />
-            {isCreator && (
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => fetchVenueAndEvents(true)} />
+        }
+      >
+        {/* Venue Card */}
+        <View style={styles.card}>
+          {/* Venue Cover Photo */}
+          {venue.image_url ? (
+            <View style={styles.coverWrapper}>
+              <Image source={{ uri: venue.image_url }} style={styles.coverImage} />
+              {isCreator && (
+                <TouchableOpacity
+                  style={styles.photoOverlayBtn}
+                  onPress={handleChangeVenueImage}
+                  disabled={uploadingImage}
+                >
+                  {uploadingImage ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="camera" size={16} color="#FFF" />
+                      <Text style={styles.photoOverlayText}>Change Photo</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            isCreator && (
               <TouchableOpacity
-                style={styles.photoOverlayBtn}
+                style={styles.addPhotoBox}
                 onPress={handleChangeVenueImage}
                 disabled={uploadingImage}
               >
                 {uploadingImage ? (
-                  <ActivityIndicator size="small" color="#FFF" />
+                  <ActivityIndicator size="small" color="#007AFF" />
                 ) : (
                   <>
-                    <Ionicons name="camera" size={16} color="#FFF" />
-                    <Text style={styles.photoOverlayText}>Change Photo</Text>
+                    <Ionicons name="image-outline" size={24} color="#007AFF" />
+                    <Text style={styles.addPhotoText}>Add Venue Picture</Text>
                   </>
                 )}
               </TouchableOpacity>
+            )
+          )}
+
+          <View style={styles.headerRow}>
+            <TouchableOpacity
+              style={styles.iconBadge}
+              onPress={handleOpenVenueInMap}
+              activeOpacity={0.75}
+              accessibilityLabel={`Search ${venue.name} in map`}
+            >
+              <Ionicons name="location" size={22} color="#007AFF" />
+            </TouchableOpacity>
+
+            {isCreator && !isEditing && (
+              <TouchableOpacity
+                style={styles.editButton}
+                onPress={() => setIsEditing(true)}
+              >
+                <Ionicons name="create-outline" size={18} color="#007AFF" />
+                <Text style={styles.editButtonText}>Edit</Text>
+              </TouchableOpacity>
             )}
           </View>
-        ) : (
-          isCreator && (
-            <TouchableOpacity
-              style={styles.addPhotoBox}
-              onPress={handleChangeVenueImage}
-              disabled={uploadingImage}
-            >
-              {uploadingImage ? (
-                <ActivityIndicator size="small" color="#007AFF" />
-              ) : (
-                <>
-                  <Ionicons name="image-outline" size={24} color="#007AFF" />
-                  <Text style={styles.addPhotoText}>Add Venue Picture</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )
-        )}
 
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            style={styles.iconBadge}
-            onPress={handleOpenVenueInMap}
-            activeOpacity={0.75}
-            accessibilityLabel={`Search ${venue.name} in map`}
-          >
-            <Ionicons name="location" size={22} color="#007AFF" />
-          </TouchableOpacity>
+          {isEditing ? (
+            <View style={styles.editForm}>
+              <Text style={styles.fieldLabel}>Venue Name</Text>
+              <TextInput
+                style={styles.input}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Venue name"
+                placeholderTextColor="#999"
+              />
 
-          {isCreator && !isEditing && (
-            <TouchableOpacity
-              style={styles.editButton}
-              onPress={() => setIsEditing(true)}
-            >
-              <Ionicons name="create-outline" size={18} color="#007AFF" />
-              <Text style={styles.editButtonText}>Edit</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+              <Text style={styles.fieldLabel}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={editDescription}
+                onChangeText={setEditDescription}
+                placeholder="Add venue notes, capacity, directions..."
+                placeholderTextColor="#999"
+                multiline
+              />
 
-        {isEditing ? (
-          <View style={styles.editForm}>
-            <Text style={styles.fieldLabel}>Venue Name</Text>
-            <TextInput
-              style={styles.input}
-              value={editName}
-              onChangeText={setEditName}
-              placeholder="Venue name"
-              placeholderTextColor="#999"
-            />
+              <View style={styles.editActions}>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={handleCancelEdit}
+                  disabled={saving}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
 
-            <Text style={styles.fieldLabel}>Description</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={editDescription}
-              onChangeText={setEditDescription}
-              placeholder="Add venue notes, capacity, directions..."
-              placeholderTextColor="#999"
-              multiline
-            />
-
-            <View style={styles.editActions}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={handleCancelEdit}
-                disabled={saving}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.saveButton, saving && styles.disabledButton]}
-                onPress={handleSaveVenue}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Save Changes</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <>
-            {/* Venue Name + Search Button Beside It */}
-            <View style={styles.titleRow}>
-              <Text style={styles.venueTitle}>{venue.name}</Text>
-              <TouchableOpacity
-                style={[styles.searchIconBtn, showSearch && styles.searchIconBtnActive]}
-                onPress={toggleSearch}
-                accessibilityLabel="Search events at this venue"
-              >
-                <Ionicons
-                  name={showSearch ? 'close' : 'search'}
-                  size={18}
-                  color={showSearch ? '#FFF' : '#007AFF'}
-                />
-              </TouchableOpacity>
-            </View>
-
-            {isCreator && (
-              <View style={styles.creatorTag}>
-                <Text style={styles.creatorTagText}>Created by you</Text>
+                <TouchableOpacity
+                  style={[styles.saveButton, saving && styles.disabledButton]}
+                  onPress={handleSaveVenue}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <Text style={styles.saveButtonText}>Save Changes</Text>
+                  )}
+                </TouchableOpacity>
               </View>
-            )}
+            </View>
+          ) : (
+            <>
+              {/* Venue Name + Search Button Beside It */}
+              <View style={styles.titleRow}>
+                <Text style={styles.venueTitle}>{venue.name}</Text>
+                <TouchableOpacity
+                  style={[styles.searchIconBtn, showSearch && styles.searchIconBtnActive]}
+                  onPress={toggleSearch}
+                  accessibilityLabel="Search events at this venue"
+                >
+                  <Ionicons
+                    name={showSearch ? 'close' : 'search'}
+                    size={18}
+                    color={showSearch ? '#FFF' : '#007AFF'}
+                  />
+                </TouchableOpacity>
+              </View>
 
-            <Text style={styles.venueDescription}>
-              {venue.description?.trim()
-                ? venue.description
-                : 'No description provided for this venue.'}
-            </Text>
-          </>
-        )}
-      </View>
+              {isCreator && (
+                <View style={styles.creatorTag}>
+                  <Text style={styles.creatorTagText}>Created by you</Text>
+                </View>
+              )}
 
-      {/* Expandable Search Input */}
-      {showSearch && (
-        <View style={styles.searchBarContainer}>
-          <Ionicons name="search-outline" size={18} color="#888" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder={`Search events at ${venue.name}...`}
-            placeholderTextColor="#999"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoFocus
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={18} color="#888" />
-            </TouchableOpacity>
+              <Text style={styles.venueDescription}>
+                {venue.description?.trim()
+                  ? venue.description
+                  : 'No description provided for this venue.'}
+              </Text>
+            </>
           )}
         </View>
-      )}
 
-      {/* Events at This Venue */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>
-          Events at This Venue ({filteredEvents.length})
-        </Text>
-      </View>
+        {/* Expandable Search Input */}
+        {showSearch && (
+          <View style={styles.searchBarContainer}>
+            <Ionicons name="search-outline" size={18} color="#888" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder={`Search events at ${venue.name}...`}
+              placeholderTextColor="#999"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color="#888" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
-      {filteredEvents.length === 0 ? (
-        <View style={styles.emptyEventsCard}>
-          <Ionicons name="calendar-clear-outline" size={28} color="#8E8E93" />
-          <Text style={styles.emptyText}>
-            {searchQuery.trim()
-              ? 'No matching events found at this venue.'
-              : 'No events scheduled here yet.'}
+        {/* Events at This Venue */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            Events at This Venue ({filteredEvents.length})
           </Text>
         </View>
-      ) : (
-        filteredEvents.map(event => (
-          <TouchableOpacity
-            key={event.id}
-            style={styles.eventCard}
-            activeOpacity={0.75}
-            onPress={() => router.push(`/event/${event.id}` as any)}
-          >
-            <Text style={styles.eventTitle}>{event.title}</Text>
-            <Text style={styles.eventTime}>
-              {formatEventRange(event.start_time, event.end_time)}
+
+        {filteredEvents.length === 0 ? (
+          <View style={styles.emptyEventsCard}>
+            <Ionicons name="calendar-clear-outline" size={28} color="#8E8E93" />
+            <Text style={styles.emptyText}>
+              {searchQuery.trim()
+                ? 'No matching events found at this venue.'
+                : 'No events scheduled here yet.'}
             </Text>
-            {event.description ? (
-              <Text style={styles.eventDescription} numberOfLines={2}>
-                {event.description}
+          </View>
+        ) : (
+          filteredEvents.map(event => (
+            <TouchableOpacity
+              key={event.id}
+              style={styles.eventCard}
+              activeOpacity={0.75}
+              onPress={() => router.push(`/event/${event.id}` as any)}
+            >
+              <Text style={styles.eventTitle}>{event.title}</Text>
+              <Text style={styles.eventTime}>
+                {formatEventRange(event.start_time, event.end_time)}
               </Text>
-            ) : null}
-          </TouchableOpacity>
-        ))
-      )}
-    </ScrollView>
+              {event.description ? (
+                <Text style={styles.eventDescription} numberOfLines={2}>
+                  {event.description}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
+          ))
+        )}
+      </ScrollView>
+    </View>
   );
 }
+
+const PAGE_BG = '#F8F9FA';
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: PAGE_BG,
   },
   container: {
-    padding: 20,
-    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingTop: 4,
     paddingBottom: 60,
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: PAGE_BG,
     padding: 24,
   },
   topNavRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    backgroundColor: PAGE_BG,
+    paddingTop: 60,
+    paddingBottom: 12,
+    paddingHorizontal: 20,
+    zIndex: 10,
   },
   navBackBtn: {
+    width: 38,
+    height: 38,
     backgroundColor: '#FFF',
-    padding: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#EFEFEF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   navHeaderTitle: {
-    fontSize: 18,
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 22,
     fontWeight: '700',
     color: '#111',
+    marginHorizontal: 8,
+  },
+  headerSpacer: {
+    width: 38,
   },
   card: {
     backgroundColor: '#FFF',

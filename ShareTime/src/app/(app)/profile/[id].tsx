@@ -10,7 +10,7 @@ import {
   Alert,
   RefreshControl,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { pickAndUploadAvatar } from '@/lib/uploadAvatar';
@@ -34,6 +34,7 @@ type OrganizedEvent = {
 
 export default function ProfileDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const profileId = Array.isArray(id) ? id[0] : id;
   const router = useRouter();
 
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
@@ -46,8 +47,16 @@ export default function ProfileDetailScreen() {
 
   const isOwner = Boolean(profile && currentUserId && profile.id === currentUserId);
 
+  const handleGoBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/future-events' as any);
+    }
+  }, [router]);
+
   const loadProfileData = useCallback(async (isRefresh = false) => {
-    if (!id) return;
+    if (!profileId) return;
 
     if (isRefresh) {
       setRefreshing(true);
@@ -64,7 +73,7 @@ export default function ProfileDetailScreen() {
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('id, email, full_name, avatar_url')
-        .eq('id', id)
+        .eq('id', profileId)
         .single();
 
       if (profileError) throw profileError;
@@ -79,7 +88,7 @@ export default function ProfileDetailScreen() {
           end_time,
           venues:venue_id (name)
         `)
-        .eq('created_by', id)
+        .eq('created_by', profileId)
         .order('start_time', { ascending: false })
         .limit(10);
 
@@ -100,7 +109,7 @@ export default function ProfileDetailScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [id]);
+  }, [profileId]);
 
   useEffect(() => {
     loadProfileData(false);
@@ -148,6 +157,7 @@ export default function ProfileDetailScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
+        <Stack.Screen options={{ headerShown: false }} />
         <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
@@ -156,8 +166,9 @@ export default function ProfileDetailScreen() {
   if (!profile) {
     return (
       <View style={styles.centered}>
+        <Stack.Screen options={{ headerShown: false }} />
         <Text style={styles.emptyText}>Profile not found.</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={handleGoBack}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -167,142 +178,163 @@ export default function ProfileDetailScreen() {
   const displayName = profile.full_name?.trim() || profile.email || 'User';
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={() => loadProfileData(true)} />
-      }
-    >
-      {/* Top Header */}
+    <View style={styles.screen}>
+      <Stack.Screen options={{ headerShown: false }} />
+
+      {/* Fixed Top Header (outside ScrollView) */}
       <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.iconButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.iconButton} onPress={handleGoBack}>
           <Ionicons name="arrow-back" size={20} color="#111" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Profile</Text>
-        <View style={{ width: 38 }} />
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          Profile
+        </Text>
+        <View style={styles.headerSpacer} />
       </View>
 
-      {/* Profile Card */}
-      <View style={styles.profileCard}>
-        <View style={styles.avatarWrapper}>
-          {profile.avatar_url ? (
-            <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
-          ) : (
-            <View style={styles.avatarFallback}>
-              <Text style={styles.avatarInitials}>
-                {getInitials(profile.full_name, profile.email)}
-              </Text>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => loadProfileData(true)} />
+        }
+      >
+        {/* Profile Card */}
+        <View style={styles.profileCard}>
+          <View style={styles.avatarWrapper}>
+            {profile.avatar_url ? (
+              <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarInitials}>
+                  {getInitials(profile.full_name, profile.email)}
+                </Text>
+              </View>
+            )}
+
+            {isOwner && (
+              <TouchableOpacity
+                style={styles.cameraBadge}
+                onPress={handleChangeAvatar}
+                disabled={uploadingAvatar}
+                accessibilityLabel="Change profile picture"
+              >
+                {uploadingAvatar ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Ionicons name="camera" size={18} color="#FFF" />
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <Text style={styles.displayName}>{displayName}</Text>
+          {profile.email ? <Text style={styles.emailText}>{profile.email}</Text> : null}
+
+          {isOwner && (
+            <View style={styles.ownerBadge}>
+              <Text style={styles.ownerBadgeText}>Your Profile</Text>
             </View>
           )}
 
           {isOwner && (
             <TouchableOpacity
-              style={styles.cameraBadge}
+              style={[styles.changePhotoBtn, uploadingAvatar && styles.disabledBtn]}
               onPress={handleChangeAvatar}
               disabled={uploadingAvatar}
-              accessibilityLabel="Change profile picture"
             >
-              {uploadingAvatar ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <Ionicons name="camera" size={18} color="#FFF" />
-              )}
+              <Ionicons name="image-outline" size={18} color="#007AFF" />
+              <Text style={styles.changePhotoText}>
+                {uploadingAvatar
+                  ? 'Uploading Photo...'
+                  : profile.avatar_url
+                  ? 'Change Profile Picture'
+                  : 'Upload Profile Picture'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
 
-        <Text style={styles.displayName}>{displayName}</Text>
-        {profile.email ? <Text style={styles.emailText}>{profile.email}</Text> : null}
+        {/* Organized Events Section */}
+        <Text style={styles.sectionTitle}>Organized Events ({organizedEvents.length})</Text>
 
-        {isOwner && (
-          <View style={styles.ownerBadge}>
-            <Text style={styles.ownerBadgeText}>Your Profile</Text>
+        {organizedEvents.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="calendar-outline" size={26} color="#8E8E93" />
+            <Text style={styles.emptyText}>No events organized yet.</Text>
           </View>
+        ) : (
+          organizedEvents.map(ev => (
+            <TouchableOpacity
+              key={ev.id}
+              style={styles.eventCard}
+              activeOpacity={0.75}
+              onPress={() => router.push(`/event/${ev.id}` as any)}
+            >
+              <Text style={styles.eventTitle}>{ev.title}</Text>
+              <Text style={styles.eventMeta}>
+                {formatDateRange(ev.start_time, ev.end_time)}
+              </Text>
+              {ev.venues?.name ? (
+                <Text style={styles.eventVenue}>📍 {ev.venues.name}</Text>
+              ) : null}
+            </TouchableOpacity>
+          ))
         )}
-
-        {isOwner && (
-          <TouchableOpacity
-            style={[styles.changePhotoBtn, uploadingAvatar && styles.disabledBtn]}
-            onPress={handleChangeAvatar}
-            disabled={uploadingAvatar}
-          >
-            <Ionicons name="image-outline" size={18} color="#007AFF" />
-            <Text style={styles.changePhotoText}>
-              {uploadingAvatar
-                ? 'Uploading Photo...'
-                : profile.avatar_url
-                ? 'Change Profile Picture'
-                : 'Upload Profile Picture'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Organized Events Section */}
-      <Text style={styles.sectionTitle}>Organized Events ({organizedEvents.length})</Text>
-
-      {organizedEvents.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Ionicons name="calendar-outline" size={26} color="#8E8E93" />
-          <Text style={styles.emptyText}>No events organized yet.</Text>
-        </View>
-      ) : (
-        organizedEvents.map(ev => (
-          <TouchableOpacity
-            key={ev.id}
-            style={styles.eventCard}
-            activeOpacity={0.75}
-            onPress={() => router.push(`/event/${ev.id}` as any)}
-          >
-            <Text style={styles.eventTitle}>{ev.title}</Text>
-            <Text style={styles.eventMeta}>
-              {formatDateRange(ev.start_time, ev.end_time)}
-            </Text>
-            {ev.venues?.name ? (
-              <Text style={styles.eventVenue}>📍 {ev.venues.name}</Text>
-            ) : null}
-          </TouchableOpacity>
-        ))
-      )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
+
+const PAGE_BG = '#F8F9FA';
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: PAGE_BG,
   },
   container: {
-    padding: 20,
-    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingTop: 4,
     paddingBottom: 60,
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: PAGE_BG,
     padding: 24,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 18,
+    backgroundColor: PAGE_BG,
+    paddingTop: 60,
+    paddingBottom: 12,
+    paddingHorizontal: 20,
+    zIndex: 10,
   },
   iconButton: {
+    width: 38,
+    height: 38,
     backgroundColor: '#FFF',
-    padding: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#EFEFEF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 18,
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 22,
     fontWeight: '700',
     color: '#111',
+    marginHorizontal: 8,
+  },
+  headerSpacer: {
+    width: 38,
   },
   profileCard: {
     backgroundColor: '#FFF',
