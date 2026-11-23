@@ -1,13 +1,13 @@
 // app/(app)/(tabs)/profile.tsx
 import React, { useState, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  ActivityIndicator, 
-  Alert, 
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -140,7 +140,7 @@ export default function MyProfileScreen() {
 
       if (error) throw error;
 
-      setProfile(prev => prev ? { ...prev, full_name: fullName.trim(), bio: bio.trim() } : null);
+      setProfile(prev => (prev ? { ...prev, full_name: fullName.trim(), bio: bio.trim() } : null));
       setIsEditing(false);
       Alert.alert('Success', 'Profile updated successfully!');
     } catch (error: any) {
@@ -196,13 +196,19 @@ export default function MyProfileScreen() {
   }
 
   return (
-    <KeyboardAvoidingView 
-      style={{ flex: 1, backgroundColor: '#F8F9FA' }}
+    <KeyboardAvoidingView
+      style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      
+      {/* Fixed Header (outside ScrollView) */}
+      <View style={styles.headerRow}>
+        <Text style={styles.headerTitle}>My Profile</Text>
+      </View>
+
       <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -210,8 +216,6 @@ export default function MyProfileScreen() {
           />
         }
       >
-        <Text style={styles.headerTitle}>My Profile</Text>
-
         {/* Profile Details Card */}
         <View style={styles.card}>
           <View style={styles.avatarContainer}>
@@ -255,7 +259,7 @@ export default function MyProfileScreen() {
 
           <Text style={styles.label}>Full Name</Text>
           {isEditing ? (
-            <TextInput 
+            <TextInput
               style={styles.input}
               value={fullName}
               onChangeText={setFullName}
@@ -267,7 +271,7 @@ export default function MyProfileScreen() {
 
           <Text style={styles.label}>Bio</Text>
           {isEditing ? (
-            <TextInput 
+            <TextInput
               style={[styles.input, styles.textArea]}
               value={bio}
               onChangeText={setBio}
@@ -343,11 +347,21 @@ export default function MyProfileScreen() {
   );
 }
 
+const PAGE_BG = '#F8F9FA';
+
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: '#F8F9FA', paddingTop: 60, paddingHorizontal: 16, paddingBottom: 40 },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#111', marginBottom: 20 },
-  
+  screen: { flex: 1, backgroundColor: PAGE_BG },
+  headerRow: {
+    backgroundColor: PAGE_BG,
+    paddingTop: 60,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    zIndex: 10,
+  },
+  container: { flexGrow: 1, backgroundColor: PAGE_BG, paddingTop: 4, paddingHorizontal: 16, paddingBottom: 40 },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: PAGE_BG },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#111' },
+
   card: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#EFEFEF', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
   avatarContainer: { alignItems: 'center', marginBottom: 20 },
   avatarTouchable: { position: 'relative' },
@@ -383,7 +397,7 @@ const styles = StyleSheet.create({
   actionSection: { marginTop: 24, borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 16, gap: 12 },
   editProfileButton: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: '#EBF3FF', padding: 12, borderRadius: 8, gap: 6 },
   editProfileButtonText: { color: '#007AFF', fontWeight: '600', fontSize: 15 },
-  
+
   editRow: { flexDirection: 'row', gap: 10 },
   cancelButton: { flex: 1, backgroundColor: '#F1F3F5', padding: 12, borderRadius: 8, alignItems: 'center' },
   cancelButtonText: { color: '#495057', fontWeight: '600' },

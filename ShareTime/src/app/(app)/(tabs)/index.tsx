@@ -14,6 +14,16 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import * as SplashScreen from 'expo-splash-screen';
+import {
+  useFonts,
+  PlaywriteAUSA_100Thin,
+  PlaywriteAUSA_200ExtraLight,
+  PlaywriteAUSA_300Light,
+  PlaywriteAUSA_400Regular,
+} from '@expo-google-fonts/playwrite-au-sa';
+
+SplashScreen.preventAutoHideAsync();
 
 type EventStatus = 'accepted' | 'pending' | 'declined';
 
@@ -108,8 +118,17 @@ export default function EventsHomeScreen() {
     await Promise.all([fetchNext24hEvents(), fetchTodayWeather()]);
   }, []);
 
+  const [loaded, error] = useFonts({
+    PlaywriteAUSA_100Thin,
+    PlaywriteAUSA_200ExtraLight,
+    PlaywriteAUSA_300Light,
+    PlaywriteAUSA_400Regular,
+  });
+  
+
   useEffect(() => {
     loadData();
+    
   }, [loadData]);
 
   useFocusEffect(
@@ -293,7 +312,7 @@ const weatherDetails = getWeatherDetails(weatherCode);
       <View style={styles.overlay}>
         {/* Header */}
         <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>Next 24 Hours</Text>
+          <Text style={{ fontFamily: 'PlaywriteAUSA_400Regular', fontSize: 24,color: '#FFB347' }}>ShareTime</Text>
         </View>
 
 {/* Today's Weather Widget Banner */}
@@ -329,7 +348,9 @@ const weatherDetails = getWeatherDetails(weatherCode);
             <Text style={styles.navPillText}>Future Events</Text>
           </TouchableOpacity>
         </View>
-
+        <View style={styles.topicRow}>
+          <Text style={styles.topicLabel}>Events in the next 24 hours</Text>
+        </View>
         {/* Show Declined Switch Bar */}
         <View style={styles.switchRow}>
           <Text style={styles.switchLabel}>Show Declined Events</Text>
@@ -431,7 +452,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 12,
   },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#FFF' },
+  header: { fontSize: 22, fontWeight: 'bold', color: '#FFF' },
+  
+  title: { fontSize: 16, fontWeight: 'bold', color: '#FFF' },
 
   weatherBanner: {
     flexDirection: 'row',
@@ -476,7 +499,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-
+  topicRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0)',
+  },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -489,6 +524,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  topicLabel: {
+    color: '#FFB347',
+    fontSize: 14,
+    fontWeight: '600',
   },
   switchLabel: {
     color: '#FFF',
