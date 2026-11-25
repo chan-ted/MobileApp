@@ -118,32 +118,44 @@ export default function EventsHomeScreen() {
     await Promise.all([fetchNext24hEvents(), fetchTodayWeather()]);
   }, []);
 
-  const [loaded, error] = useFonts({
+const [loaded, error] = useFonts({
     PlaywriteAUSA_100Thin,
     PlaywriteAUSA_200ExtraLight,
     PlaywriteAUSA_300Light,
     PlaywriteAUSA_400Regular,
   });
-  
+
+  useEffect(() => {
+    if (loaded || error) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [loaded, error]);
 
   useEffect(() => {
     loadData();
-    
   }, [loadData]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchNext24hEvents();
+      fetchNext24hEvents(false);
     }, [])
   );
 
-  async function fetchNext24hEvents() {
+  async function fetchNext24hEvents(showSpinner = true) {
     try {
-      setLoading(true);
+      if (showSpinner && events.length === 0) {
+        setLoading(true);
+      }
+
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
+
+      if (!user) {
+        setEvents([]);
+        return;
+      }
 
       const now = new Date();
       const nowIso = now.toISOString();
@@ -205,8 +217,8 @@ export default function EventsHomeScreen() {
       );
 
       setEvents(uniqueEvents);
-    } catch (error: any) {
-      console.error('Error fetching 24h events:', error.message);
+    } catch (err: any) {
+      console.error('Error fetching 24h events:', err?.message || err);
     } finally {
       setLoading(false);
       setRefreshing(false);
